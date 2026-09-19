@@ -2,6 +2,7 @@
 1. AI agent building primitives && a coding harness built in GO
 2. A way for me to learn more about AI agent architecture
 3. A way for me to write some Go code (My day job is TS only)
+4. MCP's and tools I have needed
 
 ## Some notes
 - This codebase (for now) favours simplicity - no gui or tui frameworks to take my mental energy away from the actual agent bits
