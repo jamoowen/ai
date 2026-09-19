@@ -1,0 +1,65 @@
+name: Update App Store Connect OpenAPI
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+      timezone: "Europe/London"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-openapi:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download latest OpenAPI specification
+        run: |
+          curl --fail --location --silent --show-error \
+            "https://developer.apple.com/sample-code/app-store-connect/app-store-connect-openapi-specification.zip" \
+            --output /tmp/app-store-connect-openapi.zip
+
+      - name: Extract OpenAPI specification
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p api/apple
+
+          SPEC_FILE="$(
+            unzip -Z1 /tmp/app-store-connect-openapi.zip \
+              | grep -E '(^|/)openapi\.oas[^/]*\.json$' \
+              | head -n 1
+          )"
+
+          if [ -z "$SPEC_FILE" ]; then
+            echo "Could not find OpenAPI JSON file in Apple's ZIP."
+            echo "ZIP contents:"
+            unzip -Z1 /tmp/app-store-connect-openapi.zip
+            exit 1
+          fi
+
+          echo "Found: $SPEC_FILE"
+
+          unzip -p /tmp/app-store-connect-openapi.zip "$SPEC_FILE" \
+            > api/apple/app-store-connect.openapi.json
+
+      - name: Commit if specification changed
+        run: |
+          git add api/apple/app-store-connect.openapi.json
+
+          if git diff --cached --quiet; then
+            echo "OpenAPI specification has not changed."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git commit -m "Update App Store Connect OpenAPI specification"
+          git push
