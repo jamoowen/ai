@@ -39,12 +39,15 @@ ASC_ALLOW_DELETES=true
 ASC_MAX_RESPONSE_BYTES=1048576
 ```
 
-A Codex configuration can use an absolute binary path and pass only environment variable names/values from your secure local environment:
+A Codex configuration should use an explicit schema source as well as an absolute binary path: MCP hosts do not necessarily start in this repository, so the server's relative default may not resolve. Keep secrets in environment variables rather than the configuration file.
 
 ```toml
 [mcp_servers.app_store_connect]
 command = "/absolute/path/to/ai/bin/appstoreconnect-mcp"
 env_vars = ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY_PATH"]
+
+[mcp_servers.app_store_connect.env]
+ASC_OPENAPI_SOURCE = "/absolute/path/to/ai/api/apple/app-store-connect.openapi.json"
 ```
 
 v1 intentionally excludes remote/streamable MCP hosting, binary uploads/downloads, automatic pagination, embeddings or semantic search, high-level workflow tools, and live Apple integration tests.

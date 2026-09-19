@@ -231,6 +231,28 @@ func TestClientRejectsInvalidInputsBeforeTransportAndGatesMethods(t *testing.T) 
 	}
 }
 
+func TestClientPermitsValidPostAndPatchWrites(t *testing.T) {
+	post := `"/v1/apps-create":{"post":{"operationId":"apps_create","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}}}},"responses":{"200":{"description":"ok"}}}},`
+	c, err := LoadCatalog([]byte(strings.Replace(fixture, `"/v1/apps/{id}"`, post+`"/v1/apps/{id}"`, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var methods []string
+	client := &Client{Catalog: c, Tokens: token("token"), HTTPClient: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		methods = append(methods, r.Method)
+		return response(200, "{}"), nil
+	})}}
+	if _, err := client.Invoke(context.Background(), WriteOperation, Invocation{OperationID: "apps_create", Body: map[string]any{"name": "new"}}); err != nil {
+		t.Fatalf("POST write: %v", err)
+	}
+	if _, err := client.Invoke(context.Background(), WriteOperation, Invocation{OperationID: "apps_patch", PathParameters: map[string]string{"id": "x"}, Body: map[string]any{"name": "changed"}}); err != nil {
+		t.Fatalf("PATCH write: %v", err)
+	}
+	if strings.Join(methods, ",") != "POST,PATCH" {
+		t.Fatalf("methods: %v", methods)
+	}
+}
+
 func TestClientResponseRepresentations(t *testing.T) {
 	c, err := LoadCatalog([]byte(fixture))
 	if err != nil {
