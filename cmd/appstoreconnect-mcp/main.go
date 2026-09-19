@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+
 	"github.com/jamoowen/ai/appstoreconnect"
 	"github.com/jamoowen/ai/internal/appstoreconnectmcp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"os"
-	"strconv"
 )
 
 func main() {

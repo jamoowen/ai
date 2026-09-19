@@ -240,6 +240,8 @@ func TestClientResponseRepresentations(t *testing.T) {
 		h := make(http.Header)
 		h.Set("Content-Type", contentType)
 		h.Set("X-Request-Id", "id")
+		h.Set("Set-Cookie", "secret")
+		h.Set("Authorization", "secret")
 		client := &Client{Catalog: c, Tokens: token("token"), MaxResponseBytes: limit, HTTPClient: &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})}}
@@ -251,6 +253,16 @@ func TestClientResponseRepresentations(t *testing.T) {
 	}
 	if _, ok := r.Body.(map[string]any); !ok {
 		t.Fatalf("JSON body was not structured: %#v", r.Body)
+	}
+	if r.Headers["X-Request-Id"] != "id" || r.Headers["Set-Cookie"] != "" || r.Headers["Authorization"] != "" {
+		t.Fatalf("unsafe headers leaked: %#v", r.Headers)
+	}
+	r, err = invoke(200, "application/vnd.api+json", `{"data":{}}`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Body.(map[string]any); !ok {
+		t.Fatal("vendor JSON was not structured")
 	}
 	r, err = invoke(200, "text/plain", "hello", 0)
 	if err != nil || r.Body != "hello" {
@@ -266,7 +278,7 @@ func TestClientResponseRepresentations(t *testing.T) {
 	if _, err = invoke(200, "text/plain", "long", 2); err == nil {
 		t.Fatal("oversize body accepted")
 	}
-	if _, err = invoke(400, "application/json", `{"error":"bad"}`, 0); err == nil {
+	if _, err = invoke(400, "application/json", `{"error":"bad"}`, 0); err == nil || !strings.Contains(err.Error(), "bad") {
 		t.Fatal("non-2xx accepted")
 	}
 }
