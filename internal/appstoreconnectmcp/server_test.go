@@ -2,20 +2,28 @@ package appstoreconnectmcp
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jamoowen/ai/appstoreconnect"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const testSpec = `{"openapi":"3.0.1","info":{"title":"test","version":"1"},"paths":{"/v1/apps":{"get":{"operationId":"apps_getCollection","responses":{"200":{"description":"ok"}}}}}}`
+const testSpec = `{"openapi":"3.0.1","info":{"title":"test","version":"1"},"security":[{"itc-bearer-token":[]}],"components":{"securitySchemes":{"itc-bearer-token":{"type":"http","scheme":"bearer"}}},"paths":{"/v1/apps":{"get":{"operationId":"apps_getCollection","responses":{"200":{"description":"ok"}}}}}}`
 
 func TestProtocolListsFiveToolsAndGatesMutations(t *testing.T) {
 	catalog, err := appstoreconnect.LoadCatalog([]byte(testSpec))
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(Config{Catalog: catalog, Client: &appstoreconnect.Client{Catalog: catalog, Tokens: token("x")}})
+	clientTransport := roundTrip(func(*http.Request) (*http.Response, error) {
+		h := make(http.Header)
+		h.Set("Content-Type", "application/json")
+		return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(`{"data":[]}`))}, nil
+	})
+	server := New(Config{Catalog: catalog, Client: &appstoreconnect.Client{Catalog: catalog, Tokens: token("x"), HTTPClient: &http.Client{Transport: clientTransport}}})
 	st, ct := mcp.NewInMemoryTransports()
 	if _, err := server.Connect(context.Background(), st, nil); err != nil {
 		t.Fatal(err)
@@ -53,7 +61,19 @@ func TestProtocolListsFiveToolsAndGatesMutations(t *testing.T) {
 			}
 		}
 	}
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_write", Arguments: map[string]any{"operationId": "apps_getCollection"}})
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_search_operations", Arguments: map[string]any{"query": "collection"}})
+	if err != nil || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "apps_getCollection") {
+		t.Fatalf("search routing: %#v %v", result, err)
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_describe_operation", Arguments: map[string]any{"operationId": "apps_getCollection"}})
+	if err != nil || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "operationId") {
+		t.Fatalf("describe routing: %#v %v", result, err)
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_read", Arguments: map[string]any{"operationId": "apps_getCollection"}})
+	if err != nil || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "data") {
+		t.Fatalf("read routing: %#v %v", result, err)
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_write", Arguments: map[string]any{"operationId": "apps_getCollection"}})
 	if err != nil || !result.IsError {
 		t.Fatal("disabled write unexpectedly succeeded")
 	}
@@ -66,3 +86,7 @@ func TestProtocolListsFiveToolsAndGatesMutations(t *testing.T) {
 type token string
 
 func (t token) Token(context.Context) (string, error) { return string(t), nil }
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (r roundTrip) RoundTrip(req *http.Request) (*http.Response, error) { return r(req) }

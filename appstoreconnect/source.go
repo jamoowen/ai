@@ -1,6 +1,7 @@
 package appstoreconnect
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +23,21 @@ func LoadCatalogSource(source string) (*Catalog, error) {
 		if u.Scheme != "https" {
 			return nil, fmt.Errorf("OpenAPI URL must use HTTPS")
 		}
-		resp, err := sourceHTTPClient.Get(source)
+		client := *sourceHTTPClient
+		prior := client.CheckRedirect
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" {
+				return errors.New("OpenAPI redirects must use HTTPS")
+			}
+			if prior != nil {
+				return prior(req, via)
+			}
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return nil
+		}
+		resp, err := client.Get(source)
 		if err != nil {
 			return nil, err
 		}

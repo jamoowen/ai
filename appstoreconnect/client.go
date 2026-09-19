@@ -203,6 +203,9 @@ func (c *Client) httpClient() *http.Client {
 		if prior != nil {
 			return prior(req, via)
 		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
 		return nil
 	}
 	return &clone

@@ -18,26 +18,35 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const fixture = `{"openapi":"3.0.1","info":{"title":"test","version":"1"},"paths":{"/v1/apps/{id}":{"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"get":{"operationId":"apps_get","tags":["Apps"],"parameters":[{"name":"filter[name]","in":"query","style":"form","explode":false,"schema":{"type":"array","items":{"type":"string"}}}],"responses":{"200":{"description":"ok"}}},"patch":{"operationId":"apps_patch","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}}}},"responses":{"200":{"description":"ok"}}}}}}`
+const fixture = `{"openapi":"3.0.1","info":{"title":"test","version":"1"},"security":[{"itc-bearer-token":[]}],"components":{"securitySchemes":{"itc-bearer-token":{"type":"http","scheme":"bearer"}}},"paths":{"/v1/apps":{"get":{"operationId":"apps_getCollection","responses":{"200":{"description":"ok"}}}},"/v1/apps/{id}":{"parameters":[{"name":"id","description":"path identifier","in":"path","required":true,"schema":{"type":"string"}}],"get":{"operationId":"apps_get","tags":["Apps"],"parameters":[{"name":"filter[name]","description":"operation filter","in":"query","style":"form","explode":false,"schema":{"type":"array","items":{"type":"string"}}},{"name":"include","in":"query","style":"form","explode":true,"schema":{"type":"array","items":{"type":"string"}}},{"name":"mode","in":"query","required":false,"schema":{"type":"string","enum":["one"]}}],"responses":{"200":{"description":"ok"}}},"patch":{"operationId":"apps_patch","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}}}},"responses":{"200":{"description":"ok"}}},"delete":{"operationId":"apps_delete","responses":{"204":{"description":"ok"}}}}}}`
 
 func TestCatalogAndClient(t *testing.T) {
 	c, err := LoadCatalog([]byte(fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := c.Search("apps get", "GET", 10)
+	got := c.Search("filter name", "GET", 10)
 	if len(got) != 1 || got[0].OperationID != "apps_get" {
 		t.Fatalf("search: %#v", got)
 	}
 	if got := c.Search("get filter name", "", 10); len(got) != 1 {
 		t.Fatalf("method/parameter search: %#v", got)
 	}
+	if got := c.Search("path identifier", "", 10); len(got) != 3 {
+		t.Fatalf("path parameter search: %#v", got)
+	}
+	if got := c.Search("operation filter", "", 10); len(got) != 1 {
+		t.Fatalf("operation parameter search: %#v", got)
+	}
+	if got := c.Search("get", "GET", 10); len(got) != 2 || got[0].OperationID != "apps_get" || got[1].OperationID != "apps_getCollection" {
+		t.Fatalf("deterministic filter: %#v", got)
+	}
 	d, err := c.Describe("apps_get")
 	if err != nil || d["operation"] == nil {
 		t.Fatalf("describe: %v %#v", err, d)
 	}
 	rt := roundTrip(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != "api.appstoreconnect.apple.com" || r.URL.Query().Get("filter[name]") != "a,b" {
+		if r.URL.Host != "api.appstoreconnect.apple.com" || r.URL.EscapedPath() != "/v1/apps/a%2Fb" || r.URL.Query().Get("filter[name]") != "a,b" || strings.Join(r.URL.Query()["include"], ",") != "a,b" {
 			t.Fatalf("bad request %s", r.URL)
 		}
 		if r.Header.Get("Authorization") != "Bearer token" {
@@ -46,13 +55,13 @@ func TestCatalogAndClient(t *testing.T) {
 		return response(200, "{}"), nil
 	})
 	client := &Client{Catalog: c, Tokens: token("token"), HTTPClient: &http.Client{Transport: rt}}
-	if _, err := client.Invoke(context.Background(), "read", Invocation{OperationID: "apps_get", PathParameters: map[string]string{"id": "a/b"}, Query: map[string]any{"filter[name]": []string{"a", "b"}}}); err != nil {
+	if _, err := client.Invoke(context.Background(), ReadOperation, Invocation{OperationID: "apps_get", PathParameters: map[string]string{"id": "a/b"}, Query: map[string]any{"filter[name]": []string{"a", "b"}, "include": []string{"a", "b"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Invoke(context.Background(), "read", Invocation{OperationID: "apps_patch"}); err == nil {
+	if _, err := client.Invoke(context.Background(), ReadOperation, Invocation{OperationID: "apps_patch"}); err == nil {
 		t.Fatal("write accepted as read")
 	}
-	if _, err := client.Invoke(context.Background(), "write", Invocation{OperationID: "apps_patch", PathParameters: map[string]string{"id": "x"}, Body: map[string]any{}}); err == nil {
+	if _, err := client.Invoke(context.Background(), WriteOperation, Invocation{OperationID: "apps_patch", PathParameters: map[string]string{"id": "x"}, Body: map[string]any{}}); err == nil {
 		t.Fatal("invalid body reached transport")
 	}
 }
@@ -83,7 +92,7 @@ func TestJWTClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	claims := parsed.Claims.(jwt.MapClaims)
-	if parsed.Header["alg"] != "ES256" || parsed.Header["kid"] != "kid" || claims["iss"] != "issuer" || claims["aud"] != "appstoreconnect-v1" || claims["sub"] != nil || claims["exp"].(float64)-claims["iat"].(float64) != 300 {
+	if parsed.Header["alg"] != "ES256" || parsed.Header["kid"] != "kid" || parsed.Header["typ"] != "JWT" || claims["iss"] != "issuer" || claims["aud"] != "appstoreconnect-v1" || claims["sub"] != nil || claims["iat"] != float64(now.Unix()) || claims["exp"] != float64(now.Add(5*time.Minute).Unix()) {
 		t.Fatalf("claims %#v", claims)
 	}
 	individual, err := NewES256TokenSource("kid", "", p, 5*time.Minute, func() time.Time { return now })
@@ -99,7 +108,7 @@ func TestJWTClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	claims = parsed.Claims.(jwt.MapClaims)
-	if claims["sub"] != "user" || claims["iss"] != nil {
+	if parsed.Header["alg"] != "ES256" || parsed.Header["kid"] != "kid" || parsed.Header["typ"] != "JWT" || claims["aud"] != "appstoreconnect-v1" || claims["iat"] != float64(now.Unix()) || claims["exp"] != float64(now.Add(5*time.Minute).Unix()) || claims["sub"] != "user" || claims["iss"] != nil {
 		t.Fatalf("individual claims %#v", claims)
 	}
 	if _, err := NewES256TokenSource("kid", "", p, 21*time.Minute, nil); err == nil {
@@ -107,6 +116,22 @@ func TestJWTClaims(t *testing.T) {
 	}
 	if _, err := NewES256TokenSource("kid", "", p, -time.Minute, nil); err == nil {
 		t.Fatal("negative lifetime accepted")
+	}
+	defaults, err := NewES256TokenSource("kid", "", p, 0, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err = defaults.Token(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err = jwt.Parse(raw, func(token *jwt.Token) (any, error) { return &key.PublicKey, nil }, jwt.WithTimeFunc(func() time.Time { return now }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims = parsed.Claims.(jwt.MapClaims)
+	if claims["exp"].(float64)-claims["iat"].(float64) != 300 {
+		t.Fatal("default lifetime is not five minutes")
 	}
 }
 
@@ -118,8 +143,9 @@ func TestCheckedInAppleSpecCompatibility(t *testing.T) {
 	if _, err := c.Operation("apps_getCollection"); err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Search("create app", "POST", 10)) == 0 {
-		t.Fatal("expected a POST operation")
+	mutation, err := c.Operation("apps_updateInstance")
+	if err != nil || mutation.Method != "PATCH" {
+		t.Fatalf("mutation: %#v %v", mutation, err)
 	}
 }
 
@@ -146,6 +172,62 @@ func TestClientRejectsUnknownPathAndRedirects(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("got %d requests; redirect should not reach another host", calls)
+	}
+}
+
+func TestClientRedirectLimitIsPreserved(t *testing.T) {
+	c := &Client{}
+	req, _ := http.NewRequest("GET", BaseURL, nil)
+	via := make([]*http.Request, 10)
+	if err := c.httpClient().CheckRedirect(req, via); err == nil {
+		t.Fatal("default redirect limit removed")
+	}
+}
+
+func TestClientRejectsInvalidInputsBeforeTransportAndGatesMethods(t *testing.T) {
+	c, err := LoadCatalog([]byte(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	client := &Client{Catalog: c, Tokens: token("token"), HTTPClient: &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) { calls++; return response(200, "{}"), nil })}}
+	cases := []Invocation{
+		{OperationID: "apps_get"},
+		{OperationID: "apps_get", PathParameters: map[string]string{"id": "x"}, Query: map[string]any{"unknown": "x"}},
+		{OperationID: "apps_get", PathParameters: map[string]string{"id": "x"}, Query: map[string]any{"mode": "bad"}},
+	}
+	for _, in := range cases {
+		if _, err := client.Invoke(context.Background(), ReadOperation, in); err == nil {
+			t.Fatalf("invalid input accepted: %#v", in)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("invalid inputs reached transport: %d", calls)
+	}
+	if _, err := client.Invoke(context.Background(), WriteOperation, Invocation{OperationID: "apps_patch", PathParameters: map[string]string{"id": "x"}, Body: map[string]any{}}); err == nil {
+		t.Fatal("invalid body accepted")
+	}
+	if calls != 0 {
+		t.Fatal("invalid body reached transport")
+	}
+	if _, err := client.Invoke(context.Background(), WriteOperation, Invocation{OperationID: "apps_get", PathParameters: map[string]string{"id": "x"}}); err == nil {
+		t.Fatal("GET allowed as write")
+	}
+	if _, err := client.Invoke(context.Background(), DeleteOperation, Invocation{OperationID: "apps_get", PathParameters: map[string]string{"id": "x"}}); err == nil {
+		t.Fatal("GET allowed as delete")
+	}
+	if _, err := client.Invoke(context.Background(), DeleteOperation, Invocation{OperationID: "apps_delete", PathParameters: map[string]string{"id": "x"}}); err != nil {
+		t.Fatalf("DELETE routing: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected only successful delete transport, got %d", calls)
+	}
+	empty := &Client{Catalog: c, Tokens: token(""), HTTPClient: &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) { calls++; return response(200, "{}"), nil })}}
+	if _, err := empty.Invoke(context.Background(), ReadOperation, Invocation{OperationID: "apps_get", PathParameters: map[string]string{"id": "x"}}); err == nil {
+		t.Fatal("empty bearer accepted")
+	}
+	if calls != 1 {
+		t.Fatal("empty bearer reached transport")
 	}
 }
 
@@ -211,6 +293,24 @@ func TestCatalogSourceLoadsLocalAndCapsHTTPS(t *testing.T) {
 	}
 }
 
+func TestCatalogSourceRejectsHTTPSDowngradeRedirect(t *testing.T) {
+	old := sourceHTTPClient
+	defer func() { sourceHTTPClient = old }()
+	calls := 0
+	sourceHTTPClient = &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		calls++
+		h := make(http.Header)
+		h.Set("Location", "http://example.com/spec.json")
+		return &http.Response{StatusCode: http.StatusFound, Header: h, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	if _, err := LoadCatalogSource("https://example.com/spec.json"); err == nil {
+		t.Fatal("HTTPS downgrade accepted")
+	}
+	if calls != 1 {
+		t.Fatalf("redirect issued %d requests", calls)
+	}
+}
+
 func TestCatalogRejectsMalformedMissingAndDuplicateOperationIDs(t *testing.T) {
 	if _, err := LoadCatalog([]byte("{")); err == nil {
 		t.Fatal("malformed spec accepted")
@@ -222,6 +322,25 @@ func TestCatalogRejectsMalformedMissingAndDuplicateOperationIDs(t *testing.T) {
 	duplicate := strings.Replace(fixture, "apps_patch", "apps_get", 1)
 	if _, err := LoadCatalog([]byte(duplicate)); err == nil {
 		t.Fatal("duplicate operation ID accepted")
+	}
+}
+
+func TestDescribeIncludesTransitiveCyclicSchemas(t *testing.T) {
+	spec := `{"openapi":"3.0.1","info":{"title":"cycle","version":"1"},"paths":{"/x":{"get":{"operationId":"cycle_get","responses":{"200":{"description":"ok","content":{"application/json":{"schema":{"$ref":"#/components/schemas/A"}}}}}}}},"components":{"schemas":{"A":{"type":"object","properties":{"b":{"$ref":"#/components/schemas/B"}}},"B":{"type":"object","properties":{"a":{"$ref":"#/components/schemas/A"}}}}}}`
+	c, err := LoadCatalog([]byte(spec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := c.Describe("cycle_get")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemas := d["schemas"].(map[string]any)
+	if len(schemas) != 2 || schemas["A"] == nil || schemas["B"] == nil {
+		t.Fatalf("schemas %#v", schemas)
+	}
+	if _, err := c.Describe("unknown"); err == nil {
+		t.Fatal("unknown operation described")
 	}
 }
 
