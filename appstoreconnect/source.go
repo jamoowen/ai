@@ -5,12 +5,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
 
 const DefaultSpecPath = "api/apple/app-store-connect.openapi.json"
+
+var sourceHTTPClient = &http.Client{Timeout: 20 * time.Second}
 
 func LoadCatalogSource(source string) (*Catalog, error) {
 	if source == "" {
@@ -21,8 +22,7 @@ func LoadCatalogSource(source string) (*Catalog, error) {
 		if u.Scheme != "https" {
 			return nil, fmt.Errorf("OpenAPI URL must use HTTPS")
 		}
-		client := &http.Client{Timeout: 20 * time.Second}
-		resp, err := client.Get(source)
+		resp, err := sourceHTTPClient.Get(source)
 		if err != nil {
 			return nil, err
 		}
@@ -42,9 +42,5 @@ func LoadCatalogSource(source string) (*Catalog, error) {
 	if strings.HasPrefix(source, "//") {
 		return nil, fmt.Errorf("OpenAPI URL must use HTTPS")
 	}
-	b, err := os.ReadFile(source)
-	if err != nil {
-		return nil, err
-	}
-	return LoadCatalog(b)
+	return LoadCatalogFile(source)
 }

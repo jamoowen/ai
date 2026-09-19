@@ -83,8 +83,8 @@ func (c *Catalog) Search(query, method string, limit int) []OperationSummary {
 		if method != "" && item.Method != method {
 			continue
 		}
-		hay := strings.ToLower(item.OperationID + " " + splitCamel(item.OperationID) + " " + item.Path + " " + strings.Join(item.Tags, " ") + " " + item.op.Description + " " + item.op.Summary)
-		for _, p := range item.op.Parameters {
+		hay := strings.ToLower(item.OperationID + " " + splitCamel(item.OperationID) + " " + item.Method + " " + item.Path + " " + strings.Join(item.Tags, " ") + " " + item.op.Description + " " + item.op.Summary)
+		for _, p := range parameters(item) {
 			if p.Value != nil {
 				hay += " " + strings.ToLower(p.Value.Name+" "+p.Value.Description)
 			}
@@ -120,9 +120,9 @@ func splitCamel(s string) string {
 	return b.String()
 }
 func (c *Catalog) Operation(id string) (OperationSummary, error) {
-	o, ok := c.operations[id]
-	if !ok {
-		return OperationSummary{}, fmt.Errorf("unknown operationId %q", id)
+	o, err := c.lookup(id)
+	if err != nil {
+		return OperationSummary{}, err
 	}
 	return o.OperationSummary, nil
 }

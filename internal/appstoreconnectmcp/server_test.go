@@ -34,13 +34,32 @@ func TestProtocolListsFiveToolsAndGatesMutations(t *testing.T) {
 		t.Fatalf("got %d tools", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
-		if tool.Name == "asc_write" && (tool.Annotations == nil || tool.Annotations.ReadOnlyHint) {
-			t.Fatal("write annotations are not conservative")
+		a := tool.Annotations
+		if a == nil {
+			t.Fatalf("%s has no annotations", tool.Name)
+		}
+		switch tool.Name {
+		case "asc_search_operations", "asc_describe_operation":
+			if !a.ReadOnlyHint || a.OpenWorldHint == nil || *a.OpenWorldHint {
+				t.Fatalf("bad local annotations for %s", tool.Name)
+			}
+		case "asc_read":
+			if !a.ReadOnlyHint || a.OpenWorldHint == nil || !*a.OpenWorldHint {
+				t.Fatal("bad read annotations")
+			}
+		case "asc_write", "asc_delete":
+			if a.ReadOnlyHint || a.DestructiveHint == nil || !*a.DestructiveHint || a.IdempotentHint || a.OpenWorldHint == nil || !*a.OpenWorldHint {
+				t.Fatalf("bad mutation annotations for %s", tool.Name)
+			}
 		}
 	}
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_write", Arguments: map[string]any{"operationId": "apps_getCollection"}})
 	if err != nil || !result.IsError {
 		t.Fatal("disabled write unexpectedly succeeded")
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_delete", Arguments: map[string]any{"operationId": "apps_getCollection"}})
+	if err != nil || !result.IsError {
+		t.Fatal("disabled delete unexpectedly succeeded")
 	}
 }
 

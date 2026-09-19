@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -19,6 +20,14 @@ import (
 
 const BaseURL = "https://api.appstoreconnect.apple.com/"
 
+type OperationClass string
+
+const (
+	ReadOperation   OperationClass = "read"
+	WriteOperation  OperationClass = "write"
+	DeleteOperation OperationClass = "delete"
+)
+
 type Invocation struct {
 	OperationID    string            `json:"operationId"`
 	PathParameters map[string]string `json:"pathParameters,omitempty"`
@@ -28,11 +37,13 @@ type Invocation struct {
 type TokenSource interface {
 	Token(context.Context) (string, error)
 }
+
+// Response contains only JSON values or text strings, never binary data.
 type Response struct {
 	Status      int               `json:"status"`
 	ContentType string            `json:"contentType,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`
-	Body        []byte            `json:"body"`
+	Body        any               `json:"body,omitempty"`
 }
 type Client struct {
 	Catalog          *Catalog
@@ -41,7 +52,7 @@ type Client struct {
 	MaxResponseBytes int64
 }
 
-func (c *Client) Invoke(ctx context.Context, class string, in Invocation) (*Response, error) {
+func (c *Client) Invoke(ctx context.Context, class OperationClass, in Invocation) (*Response, error) {
 	if c.Catalog == nil || c.Tokens == nil {
 		return nil, errors.New("catalog and token source are required")
 	}
@@ -49,22 +60,12 @@ func (c *Client) Invoke(ctx context.Context, class string, in Invocation) (*Resp
 	if err != nil {
 		return nil, err
 	}
-	allowed := map[string]string{"read": "GET", "write": "", "delete": "DELETE"}
-	if class == "write" && op.Method != "POST" && op.Method != "PATCH" {
-		return nil, fmt.Errorf("operation %s is not a write", in.OperationID)
-	}
-	if class != "write" && allowed[class] != op.Method {
+	if !classAllows(class, op.Method) {
 		return nil, fmt.Errorf("operation %s is not permitted by %s", in.OperationID, class)
 	}
-	path := op.Path
-	for _, p := range parameters(op) {
-		if p.Value != nil && p.Value.In == "path" {
-			v, ok := in.PathParameters[p.Value.Name]
-			if !ok {
-				return nil, fmt.Errorf("missing path parameter %q", p.Value.Name)
-			}
-			path = strings.ReplaceAll(path, "{"+p.Value.Name+"}", url.PathEscape(v))
-		}
+	path, err := buildPath(op, in.PathParameters)
+	if err != nil {
+		return nil, err
 	}
 	u, err := url.Parse(BaseURL + strings.TrimPrefix(path, "/"))
 	if err != nil {
@@ -89,7 +90,7 @@ func (c *Client) Invoke(ctx context.Context, class string, in Invocation) (*Resp
 	u.RawQuery = q.Encode()
 	var body io.Reader
 	if in.Body != nil {
-		b, e := jsonMarshal(in.Body)
+		b, e := json.Marshal(in.Body)
 		if e != nil {
 			return nil, e
 		}
@@ -115,19 +116,10 @@ func (c *Client) Invoke(ctx context.Context, class string, in Invocation) (*Resp
 	if err != nil {
 		return nil, fmt.Errorf("find OpenAPI route: %w", err)
 	}
-	if err := openapi3filter.ValidateRequest(ctx, &openapi3filter.RequestValidationInput{Request: req, PathParams: params, Route: route, Options: &openapi3filter.Options{AuthenticationFunc: func(_ context.Context, a *openapi3filter.AuthenticationInput) error {
-		if !strings.HasPrefix(req.Header.Get("Authorization"), "Bearer ") {
-			return errors.New("missing bearer authorization")
-		}
-		return nil
-	}}}); err != nil {
+	if err := openapi3filter.ValidateRequest(ctx, &openapi3filter.RequestValidationInput{Request: req, PathParams: params, Route: route, Options: &openapi3filter.Options{AuthenticationFunc: authenticateBearer}}); err != nil {
 		return nil, fmt.Errorf("request validation: %w", err)
 	}
-	hc := c.HTTPClient
-	if hc == nil {
-		hc = http.DefaultClient
-	}
-	resp, err := hc.Do(req)
+	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -143,16 +135,107 @@ func (c *Client) Invoke(ctx context.Context, class string, in Invocation) (*Resp
 	if int64(len(b)) > limit {
 		return nil, fmt.Errorf("response exceeds %d byte limit", limit)
 	}
-	out := &Response{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Body: b, Headers: map[string]string{}}
-	for _, k := range []string{"X-Request-Id", "X-Rate-Limit-Limit", "X-Rate-Limit-Remaining", "Retry-After"} {
-		if v := resp.Header.Get(k); v != "" {
-			out.Headers[k] = v
-		}
+	out := &Response{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Headers: safeHeaders(resp.Header)}
+	parsed, err := parseResponseBody(out.ContentType, b)
+	if err != nil {
+		return out, err
 	}
+	out.Body = parsed
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return out, fmt.Errorf("App Store Connect returned HTTP %d: %s", resp.StatusCode, string(b))
+		return out, fmt.Errorf("App Store Connect returned HTTP %d: %s", resp.StatusCode, boundedDetail(parsed))
 	}
 	return out, nil
+}
+func classAllows(class OperationClass, method string) bool {
+	switch class {
+	case ReadOperation:
+		return method == "GET"
+	case WriteOperation:
+		return method == "POST" || method == "PATCH"
+	case DeleteOperation:
+		return method == "DELETE"
+	default:
+		return false
+	}
+}
+func buildPath(op operation, provided map[string]string) (string, error) {
+	path := op.Path
+	known := map[string]bool{}
+	for _, p := range parameters(op) {
+		if p.Value == nil || p.Value.In != "path" {
+			continue
+		}
+		known[p.Value.Name] = true
+		v, ok := provided[p.Value.Name]
+		if !ok {
+			return "", fmt.Errorf("missing path parameter %q", p.Value.Name)
+		}
+		path = strings.ReplaceAll(path, "{"+p.Value.Name+"}", url.PathEscape(v))
+	}
+	for k := range provided {
+		if !known[k] {
+			return "", fmt.Errorf("unknown path parameter %q", k)
+		}
+	}
+	return path, nil
+}
+func authenticateBearer(_ context.Context, in *openapi3filter.AuthenticationInput) error {
+	if in.SecuritySchemeName != "itc-bearer-token" {
+		return fmt.Errorf("unexpected security scheme %q", in.SecuritySchemeName)
+	}
+	auth := in.RequestValidationInput.Request.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") || strings.TrimSpace(strings.TrimPrefix(auth, "Bearer ")) == "" {
+		return errors.New("missing bearer authorization")
+	}
+	return nil
+}
+func (c *Client) httpClient() *http.Client {
+	base := c.HTTPClient
+	if base == nil {
+		base = http.DefaultClient
+	}
+	clone := *base
+	prior := clone.CheckRedirect
+	clone.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" || req.URL.Host != "api.appstoreconnect.apple.com" {
+			return errors.New("redirect leaves App Store Connect host")
+		}
+		if prior != nil {
+			return prior(req, via)
+		}
+		return nil
+	}
+	return &clone
+}
+func parseResponseBody(contentType string, b []byte) (any, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+	media, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return nil, fmt.Errorf("invalid response content type: %w", err)
+	}
+	if media == "application/json" || strings.HasSuffix(media, "+json") {
+		var v any
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, fmt.Errorf("invalid JSON response: %w", err)
+		}
+		return v, nil
+	}
+	if strings.HasPrefix(media, "text/") {
+		return string(b), nil
+	}
+	return nil, fmt.Errorf("unsupported binary response content type %q", contentType)
+}
+func boundedDetail(v any) string { b, _ := json.Marshal(v); return string(b) }
+func safeHeaders(h http.Header) map[string]string {
+	out := map[string]string{}
+	for _, k := range []string{"X-Request-Id", "X-Rate-Limit-Limit", "X-Rate-Limit-Remaining", "Retry-After"} {
+		if v := h.Get(k); v != "" {
+			out[k] = v
+		}
+	}
+	return out
 }
 func addQuery(q url.Values, k string, v any, explode *bool) {
 	ex := true
@@ -188,8 +271,6 @@ func addQuery(q url.Values, k string, v any, explode *bool) {
 		q.Set(k, fmt.Sprint(v))
 	}
 }
-
 func parameters(op operation) []*openapi3.ParameterRef {
 	return append(append([]*openapi3.ParameterRef{}, op.pathItem.Parameters...), op.op.Parameters...)
 }
-func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }

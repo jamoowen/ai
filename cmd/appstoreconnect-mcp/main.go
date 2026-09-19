@@ -29,7 +29,7 @@ func main() {
 	}
 	server := appstoreconnectmcp.New(appstoreconnectmcp.Config{Catalog: cat, Client: &appstoreconnect.Client{Catalog: cat, Tokens: token, MaxResponseBytes: max}, AllowWrites: os.Getenv("ASC_ALLOW_WRITES") == "true", AllowDeletes: os.Getenv("ASC_ALLOW_DELETES") == "true"})
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fatal(err)
 	}
 }
 func fatal(err error) { fmt.Fprintln(os.Stderr, "appstoreconnect-mcp:", err); os.Exit(1) }

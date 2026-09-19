@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"os"
 	"time"
 
@@ -14,10 +13,10 @@ import (
 )
 
 type ES256TokenSource struct {
-	KeyID, IssuerID, PrivateKeyPath string
-	Lifetime                        time.Duration
-	Now                             func() time.Time
-	key                             *ecdsa.PrivateKey
+	KeyID, IssuerID string
+	Lifetime        time.Duration
+	Now             func() time.Time
+	key             *ecdsa.PrivateKey
 }
 
 func NewES256TokenSource(keyID, issuerID, privateKeyPath string, lifetime time.Duration, now func() time.Time) (*ES256TokenSource, error) {
@@ -49,7 +48,7 @@ func NewES256TokenSource(keyID, issuerID, privateKeyPath string, lifetime time.D
 	if now == nil {
 		now = time.Now
 	}
-	return &ES256TokenSource{keyID, issuerID, privateKeyPath, lifetime, now, ec}, nil
+	return &ES256TokenSource{keyID, issuerID, lifetime, now, ec}, nil
 }
 func (s *ES256TokenSource) Token(context.Context) (string, error) {
 	now := s.Now()
@@ -63,4 +62,3 @@ func (s *ES256TokenSource) Token(context.Context) (string, error) {
 	t.Header["kid"] = s.KeyID
 	return t.SignedString(s.key)
 }
-func (s *ES256TokenSource) String() string { return fmt.Sprintf("ES256TokenSource(%s)", s.KeyID) }
