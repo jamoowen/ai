@@ -116,6 +116,7 @@ func (c *Catalog) Search(query, method string, limit int) []OperationSummary {
 	}
 	return out
 }
+
 func splitCamel(s string) string {
 	var b strings.Builder
 	for i, r := range s {
@@ -126,6 +127,7 @@ func splitCamel(s string) string {
 	}
 	return b.String()
 }
+
 func (c *Catalog) Operation(id string) (OperationSummary, error) {
 	o, err := c.lookup(id)
 	if err != nil {
@@ -133,6 +135,7 @@ func (c *Catalog) Operation(id string) (OperationSummary, error) {
 	}
 	return o.OperationSummary, nil
 }
+
 func (c *Catalog) lookup(id string) (operation, error) {
 	o, ok := c.operations[id]
 	if !ok {

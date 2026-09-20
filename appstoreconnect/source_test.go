@@ -17,7 +17,7 @@ func TestCatalogSourceRejectsHTTP(t *testing.T) {
 
 func TestCatalogSourceLoadsLocalAndCapsHTTPS(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "spec.json")
-	if err := os.WriteFile(path, []byte(fixture), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(fixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadCatalogSource(path); err != nil {

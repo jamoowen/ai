@@ -26,7 +26,7 @@ func TestJWTClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := filepath.Join(t.TempDir(), "key.p8")
-	if err := os.WriteFile(p, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: b}), 0600); err != nil {
+	if err := os.WriteFile(p, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: b}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -96,7 +96,7 @@ func TestES256TokenSourceCachesAndRefreshesTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := filepath.Join(t.TempDir(), "key.p8")
-	if err := os.WriteFile(p, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: b}), 0600); err != nil {
+	if err := os.WriteFile(p, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: b}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

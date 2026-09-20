@@ -149,6 +149,7 @@ func (c *Client) Invoke(ctx context.Context, class OperationClass, in Invocation
 	}
 	return out, nil
 }
+
 func classAllows(class OperationClass, method string) bool {
 	switch class {
 	case ReadOperation:
@@ -161,6 +162,7 @@ func classAllows(class OperationClass, method string) bool {
 		return false
 	}
 }
+
 func buildPath(op operation, provided map[string]string) (string, error) {
 	path := op.Path
 	known := map[string]bool{}
@@ -182,6 +184,7 @@ func buildPath(op operation, provided map[string]string) (string, error) {
 	}
 	return path, nil
 }
+
 func authenticateBearer(_ context.Context, in *openapi3filter.AuthenticationInput) error {
 	if in.SecuritySchemeName != "itc-bearer-token" {
 		return fmt.Errorf("unexpected security scheme %q", in.SecuritySchemeName)
@@ -192,11 +195,13 @@ func authenticateBearer(_ context.Context, in *openapi3filter.AuthenticationInpu
 	}
 	return nil
 }
+
 func (c *Client) httpClient() *http.Client {
 	return clientWithRedirectPolicy(c.HTTPClient, func(req *http.Request) bool {
 		return req.URL.Scheme == "https" && req.URL.Host == "api.appstoreconnect.apple.com"
 	}, "redirect leaves App Store Connect host")
 }
+
 func parseResponseBody(contentType string, b []byte) (any, error) {
 	if len(b) == 0 {
 		return nil, nil
@@ -217,6 +222,7 @@ func parseResponseBody(contentType string, b []byte) (any, error) {
 	}
 	return nil, fmt.Errorf("unsupported binary response content type %q", contentType)
 }
+
 func boundedDetail(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -233,6 +239,7 @@ func boundedDetail(v any) string {
 	}
 	return string(b[:limit]) + marker
 }
+
 func safeHeaders(h http.Header) map[string]string {
 	out := map[string]string{}
 	for _, k := range []string{"X-Request-Id", "X-Rate-Limit", "X-Rate-Limit-Limit", "X-Rate-Limit-Remaining", "Retry-After"} {
@@ -242,6 +249,7 @@ func safeHeaders(h http.Header) map[string]string {
 	}
 	return out
 }
+
 func addQuery(q url.Values, k string, v any, explode *bool) error {
 	explodeValues := true
 	if explode != nil {
@@ -318,6 +326,7 @@ func queryScalar(v any) (string, error) {
 		return "", fmt.Errorf("unsupported array element type %T", v)
 	}
 }
+
 func parameters(op operation) []*openapi3.ParameterRef {
 	parameters := append([]*openapi3.ParameterRef(nil), op.pathItem.Parameters...)
 	indexes := map[string]int{}

@@ -54,6 +54,7 @@ func NewES256TokenSource(keyID, issuerID, privateKeyPath string, lifetime time.D
 	}
 	return &ES256TokenSource{KeyID: keyID, IssuerID: issuerID, Lifetime: lifetime, Now: now, key: ec}, nil
 }
+
 func (s *ES256TokenSource) Token(context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -45,6 +45,7 @@ func New(cfg Config) *mcp.Server {
 	addInvoke(s, "asc_delete", mutationAnnotations, appstoreconnect.DeleteOperation, cfg.Client, cfg.AllowDeletes)
 	return s
 }
+
 func addInvoke(s *mcp.Server, name string, ann *mcp.ToolAnnotations, class appstoreconnect.OperationClass, c *appstoreconnect.Client, enabled bool) {
 	mcp.AddTool(s, &mcp.Tool{Name: name, Description: "Invoke a constrained App Store Connect API operation", Annotations: ann}, func(ctx context.Context, _ *mcp.CallToolRequest, in invokeInput) (*mcp.CallToolResult, any, error) {
 		if !enabled {
@@ -60,6 +61,7 @@ func addInvoke(s *mcp.Server, name string, ann *mcp.ToolAnnotations, class appst
 		return jsonResult(v)
 	})
 }
+
 func jsonResult(v any) (*mcp.CallToolResult, any, error) {
 	b, e := json.Marshal(v)
 	if e != nil {
