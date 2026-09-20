@@ -15,7 +15,6 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
-	"github.com/getkin/kin-openapi/routers/gorillamux"
 )
 
 const BaseURL = "https://api.appstoreconnect.apple.com/"
@@ -82,7 +81,9 @@ func (c *Client) Invoke(ctx context.Context, class OperationClass, in Invocation
 		}
 		known[p.Value.Name] = true
 		if v, ok := in.Query[p.Value.Name]; ok {
-			addQuery(q, p.Value.Name, v, p.Value.Explode)
+			if err := addQuery(q, p.Value.Name, v, p.Value.Explode); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for k := range in.Query {
@@ -111,11 +112,7 @@ func (c *Client) Invoke(ctx context.Context, class OperationClass, in Invocation
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
-	router, err := gorillamux.NewRouter(c.Catalog.doc)
-	if err != nil {
-		return nil, err
-	}
-	route, params, err := router.FindRoute(req)
+	route, params, err := c.Catalog.router.FindRoute(req)
 	if err != nil {
 		return nil, fmt.Errorf("find OpenAPI route: %w", err)
 	}
@@ -141,6 +138,9 @@ func (c *Client) Invoke(ctx context.Context, class OperationClass, in Invocation
 	out := &Response{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Headers: safeHeaders(resp.Header)}
 	parsed, err := parseResponseBody(out.ContentType, b)
 	if err != nil {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return out, fmt.Errorf("App Store Connect returned HTTP %d: %w", resp.StatusCode, err)
+		}
 		return out, err
 	}
 	out.Body = parsed
@@ -217,7 +217,22 @@ func parseResponseBody(contentType string, b []byte) (any, error) {
 	}
 	return nil, fmt.Errorf("unsupported binary response content type %q", contentType)
 }
-func boundedDetail(v any) string { b, _ := json.Marshal(v); return string(b) }
+func boundedDetail(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "unable to marshal response detail"
+	}
+	const maxDetail = 4 << 10
+	const marker = "... (truncated)"
+	if len(b) <= maxDetail {
+		return string(b)
+	}
+	limit := maxDetail - len(marker)
+	for limit > 0 && (b[limit]&0xc0) == 0x80 {
+		limit--
+	}
+	return string(b[:limit]) + marker
+}
 func safeHeaders(h http.Header) map[string]string {
 	out := map[string]string{}
 	for _, k := range []string{"X-Request-Id", "X-Rate-Limit", "X-Rate-Limit-Limit", "X-Rate-Limit-Remaining", "Retry-After"} {
@@ -227,28 +242,44 @@ func safeHeaders(h http.Header) map[string]string {
 	}
 	return out
 }
-func addQuery(q url.Values, k string, v any, explode *bool) {
+func addQuery(q url.Values, k string, v any, explode *bool) error {
 	explodeValues := true
 	if explode != nil {
 		explodeValues = *explode
 	}
 	switch x := v.(type) {
+	case nil:
+		return nil
 	case []any:
-		for _, z := range x {
-			if explodeValues {
-				q.Add(k, fmt.Sprint(z))
-			} else {
-				q.Set(k, strings.Trim(strings.Join([]string{q.Get(k), fmt.Sprint(z)}, ","), ","))
+		values := make([]string, len(x))
+		for i, z := range x {
+			value, err := queryScalar(z)
+			if err != nil {
+				return fmt.Errorf("invalid query parameter %q: %w", k, err)
 			}
+			values[i] = value
 		}
+		addQueryValues(q, k, values, explodeValues)
 	case []string:
-		for _, z := range x {
-			if explodeValues {
-				q.Add(k, z)
-			} else {
-				q.Set(k, strings.Trim(strings.Join([]string{q.Get(k), z}, ","), ","))
-			}
+		addQueryValues(q, k, x, explodeValues)
+	case []bool:
+		values := make([]string, len(x))
+		for i, value := range x {
+			values[i] = strconv.FormatBool(value)
 		}
+		addQueryValues(q, k, values, explodeValues)
+	case []float64:
+		values := make([]string, len(x))
+		for i, value := range x {
+			values[i] = strconv.FormatFloat(value, 'f', -1, 64)
+		}
+		addQueryValues(q, k, values, explodeValues)
+	case []int:
+		values := make([]string, len(x))
+		for i, value := range x {
+			values[i] = strconv.Itoa(value)
+		}
+		addQueryValues(q, k, values, explodeValues)
 	case string:
 		q.Set(k, x)
 	case bool:
@@ -258,7 +289,33 @@ func addQuery(q url.Values, k string, v any, explode *bool) {
 	case int:
 		q.Set(k, strconv.Itoa(x))
 	default:
-		q.Set(k, fmt.Sprint(v))
+		return fmt.Errorf("invalid query parameter %q: unsupported value type %T", k, v)
+	}
+	return nil
+}
+
+func addQueryValues(q url.Values, k string, values []string, explode bool) {
+	for _, value := range values {
+		if explode {
+			q.Add(k, value)
+		} else {
+			q.Set(k, strings.Trim(strings.Join([]string{q.Get(k), value}, ","), ","))
+		}
+	}
+}
+
+func queryScalar(v any) (string, error) {
+	switch x := v.(type) {
+	case string:
+		return x, nil
+	case bool:
+		return strconv.FormatBool(x), nil
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64), nil
+	case int:
+		return strconv.Itoa(x), nil
+	default:
+		return "", fmt.Errorf("unsupported array element type %T", v)
 	}
 }
 func parameters(op operation) []*openapi3.ParameterRef {

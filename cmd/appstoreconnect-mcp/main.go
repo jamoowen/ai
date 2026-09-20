@@ -25,7 +25,7 @@ func main() {
 	if raw := os.Getenv("ASC_MAX_RESPONSE_BYTES"); raw != "" {
 		max, err = strconv.ParseInt(raw, 10, 64)
 		if err != nil || max <= 0 {
-			fatal(fmt.Errorf("ASC_MAX_RESPONSE_BYTES must be positive"))
+			fatal(fmt.Errorf("ASC_MAX_RESPONSE_BYTES must be a positive integer, got %q", raw))
 		}
 	}
 	server := appstoreconnectmcp.New(appstoreconnectmcp.Config{Catalog: cat, Client: &appstoreconnect.Client{Catalog: cat, Tokens: token, MaxResponseBytes: max}, AllowWrites: os.Getenv("ASC_ALLOW_WRITES") == "true", AllowDeletes: os.Getenv("ASC_ALLOW_DELETES") == "true"})

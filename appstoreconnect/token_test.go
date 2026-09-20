@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -82,5 +83,70 @@ func TestJWTClaims(t *testing.T) {
 	claims = parsed.Claims.(jwt.MapClaims)
 	if claims["exp"].(float64)-claims["iat"].(float64) != 300 {
 		t.Fatal("default lifetime is not five minutes")
+	}
+}
+
+func TestES256TokenSourceCachesAndRefreshesTokens(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "key.p8")
+	if err := os.WriteFile(p, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: b}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s, err := NewES256TokenSource("kid", "issuer", p, 2*time.Minute, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Token(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(89 * time.Second)
+	if second, err := s.Token(context.Background()); err != nil || second != first {
+		t.Fatalf("token was not reused: %q %v", second, err)
+	}
+	now = now.Add(time.Second)
+	refreshed, err := s.Token(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed == first {
+		t.Fatal("token was not refreshed at margin")
+	}
+	parsed, err := jwt.Parse(refreshed, func(token *jwt.Token) (any, error) { return &key.PublicKey, nil }, jwt.WithTimeFunc(func() time.Time { return now }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := parsed.Claims.(jwt.MapClaims)
+	if claims["iat"] != float64(now.Unix()) || claims["exp"] != float64(now.Add(2*time.Minute).Unix()) {
+		t.Fatalf("refreshed claims %#v", claims)
+	}
+	var group sync.WaitGroup
+	tokens := make(chan string, 20)
+	for range 20 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			raw, err := s.Token(context.Background())
+			if err != nil {
+				t.Errorf("Token: %v", err)
+				return
+			}
+			tokens <- raw
+		}()
+	}
+	group.Wait()
+	close(tokens)
+	for raw := range tokens {
+		if raw != refreshed {
+			t.Fatal("concurrent callers did not share cached token")
+		}
 	}
 }

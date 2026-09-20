@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -17,6 +18,9 @@ type ES256TokenSource struct {
 	Lifetime        time.Duration
 	Now             func() time.Time
 	key             *ecdsa.PrivateKey
+	mu              sync.Mutex
+	cachedToken     string
+	cachedExpiresAt time.Time
 }
 
 func NewES256TokenSource(keyID, issuerID, privateKeyPath string, lifetime time.Duration, now func() time.Time) (*ES256TokenSource, error) {
@@ -48,10 +52,15 @@ func NewES256TokenSource(keyID, issuerID, privateKeyPath string, lifetime time.D
 	if now == nil {
 		now = time.Now
 	}
-	return &ES256TokenSource{keyID, issuerID, lifetime, now, ec}, nil
+	return &ES256TokenSource{KeyID: keyID, IssuerID: issuerID, Lifetime: lifetime, Now: now, key: ec}, nil
 }
 func (s *ES256TokenSource) Token(context.Context) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	now := s.Now()
+	if s.cachedToken != "" && now.Before(s.cachedExpiresAt.Add(-30*time.Second)) {
+		return s.cachedToken, nil
+	}
 	claims := jwt.MapClaims{"aud": "appstoreconnect-v1", "iat": now.Unix(), "exp": now.Add(s.Lifetime).Unix()}
 	if s.IssuerID != "" {
 		claims["iss"] = s.IssuerID
@@ -60,5 +69,11 @@ func (s *ES256TokenSource) Token(context.Context) (string, error) {
 	}
 	t := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	t.Header["kid"] = s.KeyID
-	return t.SignedString(s.key)
+	raw, err := t.SignedString(s.key)
+	if err != nil {
+		return "", err
+	}
+	s.cachedToken = raw
+	s.cachedExpiresAt = time.Unix(claims["exp"].(int64), 0)
+	return raw, nil
 }

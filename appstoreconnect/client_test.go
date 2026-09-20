@@ -5,7 +5,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestClientBuildsRequestsAndGatesMethods(t *testing.T) {
@@ -74,6 +76,23 @@ func TestClientRedirectLimitIsPreserved(t *testing.T) {
 	}}
 	if err := c.httpClient().CheckRedirect(req, nil); err != http.ErrUseLastResponse || !called {
 		t.Fatalf("custom redirect policy was not preserved: %v, called=%t", err, called)
+	}
+}
+
+func TestClientHTTPClientUsesDefaultTimeoutWithoutMutatingCustomClient(t *testing.T) {
+	if got := (&Client{}).httpClient().Timeout; got != defaultRequestTimeout {
+		t.Fatalf("default timeout = %s, want %s", got, defaultRequestTimeout)
+	}
+	base := &http.Client{}
+	if got := (&Client{HTTPClient: base}).httpClient().Timeout; got != defaultRequestTimeout {
+		t.Fatalf("zero custom timeout = %s, want %s", got, defaultRequestTimeout)
+	}
+	if base.Timeout != 0 {
+		t.Fatalf("custom client was mutated: %s", base.Timeout)
+	}
+	base.Timeout = 3 * time.Second
+	if got := (&Client{HTTPClient: base}).httpClient().Timeout; got != base.Timeout {
+		t.Fatalf("custom timeout = %s, want %s", got, base.Timeout)
 	}
 }
 
@@ -203,5 +222,72 @@ func TestClientResponseRepresentations(t *testing.T) {
 	}
 	if _, err = invoke(400, "application/json", `{"error":"bad"}`, 0); err == nil || !strings.Contains(err.Error(), "bad") {
 		t.Fatal("non-2xx accepted")
+	}
+	r, err = invoke(429, "", "unavailable", 0)
+	if err == nil || !strings.Contains(err.Error(), "App Store Connect returned HTTP 429") || r.Status != 429 {
+		t.Fatalf("non-2xx parse failure lost status: response=%#v err=%v", r, err)
+	}
+	large := `{"error":"` + strings.Repeat("x", 8<<10) + `"}`
+	r, err = invoke(500, "application/json", large, 16<<10)
+	if err == nil || !strings.Contains(err.Error(), "(truncated)") || len(err.Error()) > 5<<10 {
+		t.Fatalf("non-2xx detail was not bounded: len=%d err=%v", len(err.Error()), err)
+	}
+	if body, ok := r.Body.(map[string]any); !ok || len(body["error"].(string)) != 8<<10 {
+		t.Fatalf("response body was truncated: %#v", r.Body)
+	}
+}
+
+func TestClientQueryNullAndUnsupportedValuesDoNotReachTransport(t *testing.T) {
+	c, err := LoadCatalog([]byte(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	client := &Client{Catalog: c, Tokens: token("token"), HTTPClient: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Query().Has("mode") {
+			t.Fatalf("null query parameter was sent: %s", r.URL)
+		}
+		return response(200, "{}"), nil
+	})}}
+	in := Invocation{OperationID: "apps_get", PathParameters: map[string]string{"id": "x"}, Query: map[string]any{"mode": nil}}
+	if _, err := client.Invoke(context.Background(), ReadOperation, in); err != nil {
+		t.Fatalf("optional null: %v", err)
+	}
+	for _, query := range []map[string]any{{"mode": map[string]any{"bad": "value"}}, {"include": []any{"ok", nil}}, {"include": []any{map[string]any{"bad": "value"}}}} {
+		in.Query = query
+		if _, err := client.Invoke(context.Background(), ReadOperation, in); err == nil || !strings.Contains(err.Error(), "query parameter") {
+			t.Fatalf("unsupported query accepted: %#v, err=%v", query, err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("invalid queries reached transport: %d calls", calls)
+	}
+}
+
+func TestClientCanInvokeConcurrentlyWithCatalogRouter(t *testing.T) {
+	c, err := LoadCatalog([]byte(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{Catalog: c, Tokens: token("token"), HTTPClient: &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		return response(200, "{}"), nil
+	})}}
+	var group sync.WaitGroup
+	errs := make(chan error, 20)
+	for range 20 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			_, err := client.Invoke(context.Background(), ReadOperation, Invocation{OperationID: "apps_get", PathParameters: map[string]string{"id": "x"}})
+			errs <- err
+		}()
+	}
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }

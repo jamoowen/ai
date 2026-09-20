@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/routers"
+	"github.com/getkin/kin-openapi/routers/gorillamux"
 )
 
 type OperationSummary struct {
@@ -29,6 +31,7 @@ type operation struct {
 // Catalog is an immutable index over an OpenAPI document.
 type Catalog struct {
 	doc        *openapi3.T
+	router     routers.Router
 	operations map[string]operation
 	raw        map[string]any
 }
@@ -55,7 +58,11 @@ func LoadCatalog(data []byte) (*Catalog, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("decode OpenAPI JSON: %w", err)
 	}
-	c := &Catalog{doc: doc, operations: map[string]operation{}, raw: raw}
+	router, err := gorillamux.NewRouter(doc)
+	if err != nil {
+		return nil, fmt.Errorf("build OpenAPI router: %w", err)
+	}
+	c := &Catalog{doc: doc, router: router, operations: map[string]operation{}, raw: raw}
 	for path, pi := range doc.Paths.Map() {
 		for method, op := range map[string]*openapi3.Operation{"GET": pi.Get, "POST": pi.Post, "PUT": pi.Put, "PATCH": pi.Patch, "DELETE": pi.Delete, "HEAD": pi.Head, "OPTIONS": pi.Options, "TRACE": pi.Trace} {
 			if op == nil {
