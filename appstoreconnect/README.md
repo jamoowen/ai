@@ -219,7 +219,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("%s: %s\\n", tool.Name, tool.Description)
+		fmt.Printf("%s: %s\n", tool.Name, tool.Description)
 		// Register tool.Name, tool.Description, and tool.InputSchema with the model.
 	}
 
@@ -287,14 +287,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("operation: %#v\\n", description["operation"])
+	fmt.Printf("operation: %#v\n", description["operation"])
 
 	response, err := client.Invoke(context.Background(), appstoreconnect.ReadOperation, appstoreconnect.Invocation{
 		OperationID: "apps_getCollection",
 		Query:       map[string]any{"limit": 5},
 	})
 	if response != nil {
-		fmt.Printf("status: %d\\n", response.Status)
+		fmt.Printf("status: %d\n", response.Status)
 	}
 	if err != nil {
 		log.Fatal(err)
