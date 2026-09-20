@@ -106,16 +106,16 @@ Claude Code can register a local STDIO server with `claude mcp add [options] <na
 ```sh
 claude mcp add \
   --scope local \
-  --transport stdio \
   --env ASC_KEY_ID="$ASC_KEY_ID" \
-  --env ASC_ISSUER_ID="$ASC_ISSUER_ID" \
-  --env ASC_PRIVATE_KEY_PATH="$ASC_PRIVATE_KEY_PATH" \
-  --env ASC_OPENAPI_SOURCE="$ASC_OPENAPI_SOURCE" \
+        ASC_ISSUER_ID="$ASC_ISSUER_ID" \
+        ASC_PRIVATE_KEY_PATH="$ASC_PRIVATE_KEY_PATH" \
+        ASC_OPENAPI_SOURCE="$ASC_OPENAPI_SOURCE" \
+  --transport stdio \
   app-store-connect -- \
   /absolute/path/to/ai/bin/appstoreconnect-mcp
 ```
 
-For an individual key, omit the `ASC_ISSUER_ID` `--env` option. `--scope local` keeps the registration private to this project; use another scope only if that broader availability is deliberate. Verify it with `claude mcp get app-store-connect` or `claude mcp list`, and use `/mcp` in Claude Code for connection status.
+For an individual key, omit the `ASC_ISSUER_ID=...` assignment. `--scope local` keeps the registration private to this project; use another scope only if that broader availability is deliberate. Verify it with `claude mcp get app-store-connect` or `claude mcp list`, and use `/mcp` in Claude Code for connection status.
 
 For a shareable project configuration, a repository-root `.mcp.json` can reference each developer's environment without committing resolved secrets:
 
