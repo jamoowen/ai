@@ -134,7 +134,7 @@ func (c *Catalog) lookup(id string) (operation, error) {
 	return o, nil
 }
 
-// Describe returns the raw operation object and the component schemas reachable from it.
+// Describe returns the operation object with its effective parameters and reachable component schemas.
 func (c *Catalog) Describe(id string) (map[string]any, error) {
 	o, err := c.lookup(id)
 	if err != nil {
@@ -143,7 +143,16 @@ func (c *Catalog) Describe(id string) (map[string]any, error) {
 	paths, _ := c.raw["paths"].(map[string]any)
 	p, _ := paths[o.Path].(map[string]any)
 	opRaw, _ := p[strings.ToLower(o.Method)].(map[string]any)
-	result := map[string]any{"operation": opRaw, "schemas": map[string]any{}}
+	effectiveOperation := make(map[string]any, len(opRaw)+1)
+	for key, value := range opRaw {
+		effectiveOperation[key] = value
+	}
+	parameters, err := jsonParameters(parameters(o))
+	if err != nil {
+		return nil, err
+	}
+	effectiveOperation["parameters"] = parameters
+	result := map[string]any{"operation": effectiveOperation, "schemas": map[string]any{}}
 	schemas := result["schemas"].(map[string]any)
 	components, _ := c.raw["components"].(map[string]any)
 	all, _ := components["schemas"].(map[string]any)
@@ -171,6 +180,22 @@ func (c *Catalog) Describe(id string) (map[string]any, error) {
 			}
 		}
 	}
-	walk(opRaw)
+	walk(effectiveOperation)
+	return result, nil
+}
+
+func jsonParameters(parameters []*openapi3.ParameterRef) ([]any, error) {
+	result := make([]any, 0, len(parameters))
+	for _, parameter := range parameters {
+		encoded, err := json.Marshal(parameter)
+		if err != nil {
+			return nil, fmt.Errorf("encode OpenAPI parameter: %w", err)
+		}
+		var value any
+		if err := json.Unmarshal(encoded, &value); err != nil {
+			return nil, fmt.Errorf("decode OpenAPI parameter: %w", err)
+		}
+		result = append(result, value)
+	}
 	return result, nil
 }

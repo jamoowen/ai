@@ -29,7 +29,7 @@ func New(cfg Config) *mcp.Server {
 	closed, open, destructive := false, true, true
 	localRead := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closed}
 	remoteRead := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &open}
-	rw := &mcp.ToolAnnotations{DestructiveHint: &destructive, IdempotentHint: false, OpenWorldHint: &open}
+	mutationAnnotations := &mcp.ToolAnnotations{DestructiveHint: &destructive, IdempotentHint: false, OpenWorldHint: &open}
 	mcp.AddTool(s, &mcp.Tool{Name: "asc_search_operations", Description: "Search App Store Connect OpenAPI operations", Annotations: localRead}, func(_ context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, any, error) {
 		return jsonResult(cfg.Catalog.Search(in.Query, in.Method, in.Limit))
 	})
@@ -41,8 +41,8 @@ func New(cfg Config) *mcp.Server {
 		return jsonResult(v)
 	})
 	addInvoke(s, "asc_read", remoteRead, appstoreconnect.ReadOperation, cfg.Client, true)
-	addInvoke(s, "asc_write", rw, appstoreconnect.WriteOperation, cfg.Client, cfg.AllowWrites)
-	addInvoke(s, "asc_delete", rw, appstoreconnect.DeleteOperation, cfg.Client, cfg.AllowDeletes)
+	addInvoke(s, "asc_write", mutationAnnotations, appstoreconnect.WriteOperation, cfg.Client, cfg.AllowWrites)
+	addInvoke(s, "asc_delete", mutationAnnotations, appstoreconnect.DeleteOperation, cfg.Client, cfg.AllowDeletes)
 	return s
 }
 func addInvoke(s *mcp.Server, name string, ann *mcp.ToolAnnotations, class appstoreconnect.OperationClass, c *appstoreconnect.Client, enabled bool) {

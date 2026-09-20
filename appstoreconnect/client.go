@@ -63,6 +63,9 @@ func (c *Client) Invoke(ctx context.Context, class OperationClass, in Invocation
 	if !classAllows(class, op.Method) {
 		return nil, fmt.Errorf("operation %s is not permitted by %s", in.OperationID, class)
 	}
+	if in.Body != nil && op.op.RequestBody == nil {
+		return nil, fmt.Errorf("operation %s does not accept a request body", in.OperationID)
+	}
 	path, err := buildPath(op, in.PathParameters)
 	if err != nil {
 		return nil, err
@@ -190,25 +193,9 @@ func authenticateBearer(_ context.Context, in *openapi3filter.AuthenticationInpu
 	return nil
 }
 func (c *Client) httpClient() *http.Client {
-	base := c.HTTPClient
-	if base == nil {
-		base = http.DefaultClient
-	}
-	clone := *base
-	prior := clone.CheckRedirect
-	clone.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if req.URL.Scheme != "https" || req.URL.Host != "api.appstoreconnect.apple.com" {
-			return errors.New("redirect leaves App Store Connect host")
-		}
-		if prior != nil {
-			return prior(req, via)
-		}
-		if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
-		}
-		return nil
-	}
-	return &clone
+	return clientWithRedirectPolicy(c.HTTPClient, func(req *http.Request) bool {
+		return req.URL.Scheme == "https" && req.URL.Host == "api.appstoreconnect.apple.com"
+	}, "redirect leaves App Store Connect host")
 }
 func parseResponseBody(contentType string, b []byte) (any, error) {
 	if len(b) == 0 {
@@ -233,7 +220,7 @@ func parseResponseBody(contentType string, b []byte) (any, error) {
 func boundedDetail(v any) string { b, _ := json.Marshal(v); return string(b) }
 func safeHeaders(h http.Header) map[string]string {
 	out := map[string]string{}
-	for _, k := range []string{"X-Request-Id", "X-Rate-Limit-Limit", "X-Rate-Limit-Remaining", "Retry-After"} {
+	for _, k := range []string{"X-Request-Id", "X-Rate-Limit", "X-Rate-Limit-Limit", "X-Rate-Limit-Remaining", "Retry-After"} {
 		if v := h.Get(k); v != "" {
 			out[k] = v
 		}
@@ -241,14 +228,14 @@ func safeHeaders(h http.Header) map[string]string {
 	return out
 }
 func addQuery(q url.Values, k string, v any, explode *bool) {
-	ex := true
+	explodeValues := true
 	if explode != nil {
-		ex = *explode
+		explodeValues = *explode
 	}
 	switch x := v.(type) {
 	case []any:
 		for _, z := range x {
-			if ex {
+			if explodeValues {
 				q.Add(k, fmt.Sprint(z))
 			} else {
 				q.Set(k, strings.Trim(strings.Join([]string{q.Get(k), fmt.Sprint(z)}, ","), ","))
@@ -256,7 +243,7 @@ func addQuery(q url.Values, k string, v any, explode *bool) {
 		}
 	case []string:
 		for _, z := range x {
-			if ex {
+			if explodeValues {
 				q.Add(k, z)
 			} else {
 				q.Set(k, strings.Trim(strings.Join([]string{q.Get(k), z}, ","), ","))
@@ -275,5 +262,23 @@ func addQuery(q url.Values, k string, v any, explode *bool) {
 	}
 }
 func parameters(op operation) []*openapi3.ParameterRef {
-	return append(append([]*openapi3.ParameterRef{}, op.pathItem.Parameters...), op.op.Parameters...)
+	parameters := append([]*openapi3.ParameterRef(nil), op.pathItem.Parameters...)
+	indexes := map[string]int{}
+	for i, parameter := range parameters {
+		if parameter.Value != nil {
+			indexes[parameter.Value.In+"\x00"+parameter.Value.Name] = i
+		}
+	}
+	for _, parameter := range op.op.Parameters {
+		if parameter.Value != nil {
+			key := parameter.Value.In + "\x00" + parameter.Value.Name
+			if index, exists := indexes[key]; exists {
+				parameters[index] = parameter
+				continue
+			}
+			indexes[key] = len(parameters)
+		}
+		parameters = append(parameters, parameter)
+	}
+	return parameters
 }
