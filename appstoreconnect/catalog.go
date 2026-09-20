@@ -187,15 +187,19 @@ func (c *Catalog) Describe(id string) (map[string]any, error) {
 func jsonParameters(parameters []*openapi3.ParameterRef) ([]any, error) {
 	result := make([]any, 0, len(parameters))
 	for _, parameter := range parameters {
-		encoded, err := json.Marshal(parameter)
+		value := any(parameter)
+		if parameter.Value != nil {
+			value = parameter.Value
+		}
+		encoded, err := json.Marshal(value)
 		if err != nil {
 			return nil, fmt.Errorf("encode OpenAPI parameter: %w", err)
 		}
-		var value any
-		if err := json.Unmarshal(encoded, &value); err != nil {
+		var decoded any
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
 			return nil, fmt.Errorf("decode OpenAPI parameter: %w", err)
 		}
-		result = append(result, value)
+		result = append(result, decoded)
 	}
 	return result, nil
 }

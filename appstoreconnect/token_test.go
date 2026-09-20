@@ -58,7 +58,7 @@ func TestJWTClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	claims = parsed.Claims.(jwt.MapClaims)
-	if parsed.Header["alg"] != "ES256" || parsed.Header["kid"] != "kid" || claims["aud"] != "appstoreconnect-v1" || claims["iat"] != float64(now.Unix()) || claims["exp"] != float64(now.Add(5*time.Minute).Unix()) || claims["sub"] != "user" || claims["iss"] != nil {
+	if parsed.Header["alg"] != "ES256" || parsed.Header["kid"] != "kid" || parsed.Header["typ"] != "JWT" || claims["aud"] != "appstoreconnect-v1" || claims["iat"] != float64(now.Unix()) || claims["exp"] != float64(now.Add(5*time.Minute).Unix()) || claims["sub"] != "user" || claims["iss"] != nil {
 		t.Fatalf("individual claims %#v", claims)
 	}
 	if _, err := NewES256TokenSource("kid", "", p, 21*time.Minute, nil); err == nil {

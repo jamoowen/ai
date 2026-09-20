@@ -120,3 +120,34 @@ func TestDescribeReturnsEffectiveParameters(t *testing.T) {
 		t.Fatalf("operation parameter did not override inherited one: %#v", got["query:mode"])
 	}
 }
+
+func TestDescribeResolvesReferencedEffectiveParameters(t *testing.T) {
+	spec := `{"openapi":"3.0.1","info":{"title":"references","version":"1"},"paths":{"/v1/widgets/{id}":{"parameters":[{"$ref":"#/components/parameters/ID"},{"$ref":"#/components/parameters/Locale"}],"get":{"operationId":"widgets_get","parameters":[{"name":"locale","in":"query","description":"operation locale","schema":{"type":"string"}}],"responses":{"200":{"description":"ok"}}}}},"components":{"parameters":{"ID":{"name":"id","in":"path","required":true,"description":"component id","schema":{"type":"string"}},"Locale":{"name":"locale","in":"query","description":"component locale","schema":{"type":"string"}}}}}`
+	c, err := LoadCatalog([]byte(spec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	description, err := c.Describe("widgets_get")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parameters := description["operation"].(map[string]any)["parameters"].([]any)
+	got := map[string]map[string]any{}
+	for _, value := range parameters {
+		parameter := value.(map[string]any)
+		if parameter["$ref"] != nil {
+			t.Fatalf("parameter was not resolved: %#v", parameter)
+		}
+		key := parameter["in"].(string) + ":" + parameter["name"].(string)
+		if _, exists := got[key]; exists {
+			t.Fatalf("duplicate parameter %q: %#v", key, parameters)
+		}
+		got[key] = parameter
+	}
+	if got["path:id"] == nil || got["path:id"]["required"] != true || got["path:id"]["description"] != "component id" {
+		t.Fatalf("referenced path parameter was not usable: %#v", got["path:id"])
+	}
+	if got["query:locale"] == nil || got["query:locale"]["description"] != "operation locale" {
+		t.Fatalf("operation parameter did not override reference: %#v", got["query:locale"])
+	}
+}
