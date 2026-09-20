@@ -6,51 +6,9 @@
 
 ## App Store Connect MCP
 
-`appstoreconnect-mcp` is a local STDIO MCP server for Apple's App Store Connect API. It uses the checked-in OpenAPI specification in `api/apple/app-store-connect.openapi.json` and exposes exactly five tools: `asc_search_operations`, `asc_describe_operation`, `asc_read`, `asc_write`, and `asc_delete`.
+`appstoreconnect-mcp` is a local STDIO MCP server for Apple's App Store Connect API. It keeps credentials and HTTP transport outside the model's control while exposing OpenAPI-backed operations.
 
-The server is deliberately constrained: agents choose an OpenAPI `operationId`, parameters, and JSON body only. It pins the destination to `https://api.appstoreconnect.apple.com/`, resolves the path and method from the spec, validates the request before sending it, and creates the bearer JWT internally. It never gives agents a general HTTP client or credentials.
-
-Build it with:
-
-```sh
-go build -o bin/appstoreconnect-mcp ./cmd/appstoreconnect-mcp
-```
-
-Create an App Store Connect API key in App Store Connect, store its downloaded `.p8` file somewhere private, and set these environment variables in the MCP host:
-
-```sh
-ASC_KEY_ID=your-key-id
-ASC_ISSUER_ID=your-issuer-id       # omit for an individual key
-ASC_PRIVATE_KEY_PATH=/absolute/path/AuthKey_ABC123.p8
-```
-
-`ASC_OPENAPI_SOURCE` is trusted startup configuration and defaults to the checked-in file. It may be a local path or an HTTPS URL, for example:
-
-```sh
-ASC_OPENAPI_SOURCE=api/apple/app-store-connect.openapi.json
-ASC_OPENAPI_SOURCE=https://raw.githubusercontent.com/jamoowen/ai/refs/heads/main/api/apple/app-store-connect.openapi.json
-```
-
-Reads are enabled by default. Writes and deletes need separate explicit opt-ins:
-
-```sh
-ASC_ALLOW_WRITES=true
-ASC_ALLOW_DELETES=true
-ASC_MAX_RESPONSE_BYTES=1048576
-```
-
-A Codex configuration should use an explicit schema source as well as an absolute binary path: MCP hosts do not necessarily start in this repository, so the server's relative default may not resolve. Keep secrets in environment variables rather than the configuration file.
-
-```toml
-[mcp_servers.app_store_connect]
-command = "/absolute/path/to/ai/bin/appstoreconnect-mcp"
-env_vars = ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY_PATH"]
-
-[mcp_servers.app_store_connect.env]
-ASC_OPENAPI_SOURCE = "/absolute/path/to/ai/api/apple/app-store-connect.openapi.json"
-```
-
-v1 intentionally excludes remote/streamable MCP hosting, binary uploads/downloads, automatic pagination, embeddings or semantic search, high-level workflow tools, and live Apple integration tests.
+See the [App Store Connect MCP guide](appstoreconnect/README.md) for Apple credentials, Codex and Claude Code setup, custom-agent MCP integration, and direct Go usage.
 
 ## Some notes
 - This codebase (for now) favours simplicity - no gui or tui frameworks to take my mental energy away from the actual agent bits
