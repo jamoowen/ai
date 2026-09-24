@@ -106,9 +106,12 @@ export ASC_OPENAPI_SOURCE="/absolute/path/to/ai/api/apple/app-store-connect.open
 
 Reads are enabled by default. Changes to your App Store Connect data require separate, deliberate opt-ins:
 
-- Set `ASC_ALLOW_WRITES=true` to allow POST and PATCH through `asc_write`.
-- Set `ASC_ALLOW_DELETES=true` to allow DELETE through `asc_delete`.
-- Optionally set `ASC_MAX_RESPONSE_BYTES=1048576` to change the response-size limit; the default is 1 MiB.
+```sh
+export ASC_ALLOW_WRITES=true  # Allows POST and PATCH through asc_write.
+export ASC_ALLOW_DELETES=true # Allows DELETE through asc_delete.
+```
+
+Set either flag independently, and export it only when you want the MCP to make that kind of change. `ASC_MAX_RESPONSE_BYTES=1048576` is optional; it changes the response-size limit from its default of 1 MiB.
 
 ## Build and run
 
@@ -135,6 +138,14 @@ ASC_OPENAPI_SOURCE = "/absolute/path/to/ai/api/apple/app-store-connect.openapi.j
 
 For a team key, add `"ASC_ISSUER_ID"` to `env_vars`. Add write or delete variables only when you intentionally want this server to make those changes.
 
+For example, this individual-key configuration forwards the write opt-in to the MCP subprocess:
+
+```toml
+env_vars = ["ASC_KEY_ID", "ASC_PRIVATE_KEY_PATH", "ASC_ALLOW_WRITES"]
+```
+
+Add `"ASC_ALLOW_DELETES"` separately only when intended. A mutation flag that is exported in your shell must also appear in `env_vars`, or Codex will not pass it to the server.
+
 Verify the registration:
 
 ```sh
@@ -158,7 +169,14 @@ claude mcp add \
   /absolute/path/to/ai/bin/appstoreconnect-mcp
 ```
 
-For a team key, add `ASC_ISSUER_ID="$ASC_ISSUER_ID"` to that same `--env` list. Use a broader scope only when you deliberately want the server available outside this project.
+For a team key, add `ASC_ISSUER_ID="$ASC_ISSUER_ID"` to that same `--env` list. To enable mutations, add these assignments inside the existing single `--env` list, before `--transport stdio`:
+
+```sh
+ASC_ALLOW_WRITES="$ASC_ALLOW_WRITES"
+ASC_ALLOW_DELETES="$ASC_ALLOW_DELETES"
+```
+
+Add each one only when intended; do not add another `--env`. Use a broader scope only when you deliberately want the server available outside this project.
 
 Verify the registration:
 
@@ -237,9 +255,9 @@ If your agent framework already supports MCP, point it at the built binary and p
 
 1. Start one MCP session when the agent loop starts, and keep it alive for the loop.
 2. Discover the server's tools.
-3. Register each tool's name, description, and `InputSchema` with your model provider.
+3. Register each tool's name, description, and input schema with your model provider.
 4. Send the model's selected tool name and JSON arguments to MCP unchanged.
-5. Check the Go/transport error and the MCP result's `IsError` flag. Add the returned content to the next model turn.
+5. Check the transport/protocol error and the tool result's error indicator (`isError` in MCP, or the equivalent your SDK exposes). Add the returned content to the next model turn.
 
 Keep MCP tool annotations in your own policy. Require explicit authorization or confirmation before `asc_write` or `asc_delete`.
 
