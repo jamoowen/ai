@@ -31,7 +31,7 @@ func New(cfg Config) *mcp.Server {
 	remoteRead := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &open}
 	mutationAnnotations := &mcp.ToolAnnotations{DestructiveHint: &destructive, IdempotentHint: false, OpenWorldHint: &open}
 	mcp.AddTool(s, &mcp.Tool{Name: "asc_search_operations", Description: "Search App Store Connect OpenAPI operations", Annotations: localRead}, func(_ context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, any, error) {
-		return jsonResult(cfg.Catalog.Search(in.Query, in.Method, in.Limit))
+		return jsonResult(map[string]any{"operations": cfg.Catalog.Search(in.Query, in.Method, in.Limit)})
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "asc_describe_operation", Description: "Describe an operation and its referenced schemas", Annotations: localRead}, func(_ context.Context, _ *mcp.CallToolRequest, in describeInput) (*mcp.CallToolResult, any, error) {
 		v, e := cfg.Catalog.Describe(in.OperationID)

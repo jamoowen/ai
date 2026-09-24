@@ -65,6 +65,14 @@ func TestProtocolListsFiveToolsAndGatesMutations(t *testing.T) {
 	if err != nil || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "apps_getCollection") {
 		t.Fatalf("search routing: %#v %v", result, err)
 	}
+	structured, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("search structuredContent not an object: %#v", result.StructuredContent)
+	}
+	operations, ok := structured["operations"].([]any)
+	if !ok || len(operations) == 0 {
+		t.Fatalf("search structuredContent operations: %#v", structured["operations"])
+	}
 	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_describe_operation", Arguments: map[string]any{"operationId": "apps_getCollection"}})
 	if err != nil || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "operationId") {
 		t.Fatalf("describe routing: %#v %v", result, err)
