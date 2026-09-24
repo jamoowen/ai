@@ -138,7 +138,7 @@ ASC_OPENAPI_SOURCE = "/absolute/path/to/ai/api/apple/app-store-connect.openapi.j
 
 For a team key, add `"ASC_ISSUER_ID"` to `env_vars`. Add write or delete variables only when you intentionally want this server to make those changes.
 
-For example, this individual-key configuration forwards the write opt-in to the MCP subprocess:
+For example, replace the earlier `env_vars` line in the `[mcp_servers.app_store_connect]` table with this individual-key line to forward the write opt-in to the MCP subprocess:
 
 ```toml
 env_vars = ["ASC_KEY_ID", "ASC_PRIVATE_KEY_PATH", "ASC_ALLOW_WRITES"]
@@ -172,11 +172,11 @@ claude mcp add \
 For a team key, add `ASC_ISSUER_ID="$ASC_ISSUER_ID"` to that same `--env` list. To enable mutations, add these assignments inside the existing single `--env` list, before `--transport stdio`:
 
 ```sh
-ASC_ALLOW_WRITES="$ASC_ALLOW_WRITES"
-ASC_ALLOW_DELETES="$ASC_ALLOW_DELETES"
+        ASC_ALLOW_WRITES="$ASC_ALLOW_WRITES" \
+        ASC_ALLOW_DELETES="$ASC_ALLOW_DELETES" \
 ```
 
-Add each one only when intended; do not add another `--env`. Use a broader scope only when you deliberately want the server available outside this project.
+Add each one only when intended; do not add another `--env`. Even if you add only one flag, keep its trailing `\` because `--transport stdio` follows. Use a broader scope only when you deliberately want the server available outside this project.
 
 Verify the registration:
 
