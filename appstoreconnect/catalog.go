@@ -14,6 +14,8 @@ import (
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 )
 
+const maxDescriptionBytes = 32 << 10
+
 type OperationSummary struct {
 	OperationID string   `json:"operationId"`
 	Method      string   `json:"method"`
@@ -144,7 +146,8 @@ func (c *Catalog) lookup(id string) (operation, error) {
 	return o, nil
 }
 
-// Describe returns the operation object with its effective parameters and reachable component schemas.
+// Describe returns an operation's invocation contract. Component references remain
+// unexpanded; callers can inspect a referenced schema with DescribeSchema.
 func (c *Catalog) Describe(id string) (map[string]any, error) {
 	o, err := c.lookup(id)
 	if err != nil {
@@ -162,35 +165,33 @@ func (c *Catalog) Describe(id string) (map[string]any, error) {
 		return nil, err
 	}
 	effectiveOperation["parameters"] = parameters
-	result := map[string]any{"operation": effectiveOperation, "schemas": map[string]any{}}
-	schemas := result["schemas"].(map[string]any)
+	return boundedDescription(map[string]any{
+		"method":    o.Method,
+		"path":      o.Path,
+		"operation": effectiveOperation,
+	})
+}
+
+// DescribeSchema returns one named schema from components/schemas. References in
+// the schema remain unexpanded so callers can request only the schemas they need.
+func (c *Catalog) DescribeSchema(name string) (map[string]any, error) {
 	components, _ := c.raw["components"].(map[string]any)
 	all, _ := components["schemas"].(map[string]any)
-	seen := map[string]bool{}
-	var walk func(any)
-	walk = func(v any) {
-		switch x := v.(type) {
-		case map[string]any:
-			if ref, ok := x["$ref"].(string); ok && strings.HasPrefix(ref, "#/components/schemas/") {
-				n := strings.TrimPrefix(ref, "#/components/schemas/")
-				if !seen[n] {
-					seen[n] = true
-					if s, ok := all[n]; ok {
-						schemas[n] = s
-						walk(s)
-					}
-				}
-			}
-			for _, v := range x {
-				walk(v)
-			}
-		case []any:
-			for _, v := range x {
-				walk(v)
-			}
-		}
+	schema, ok := all[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown component schema %q", name)
 	}
-	walk(effectiveOperation)
+	return boundedDescription(map[string]any{"name": name, "schema": schema})
+}
+
+func boundedDescription(result map[string]any) (map[string]any, error) {
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("encode description: %w", err)
+	}
+	if len(encoded) > maxDescriptionBytes {
+		return nil, fmt.Errorf("description is %d bytes; maximum is %d bytes", len(encoded), maxDescriptionBytes)
+	}
 	return result, nil
 }
 

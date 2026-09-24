@@ -183,7 +183,7 @@ func newReadTool(client *appstoreconnect.Client) (tools.Tool, error) {
 }
 ```
 
-Register the returned tool's `Name`, `Description`, and `Parameters` with your model provider. When the model selects it, pass its raw JSON arguments to `Handler` and add the returned text to the next model turn. Register similar read-only wrappers for `catalog.Search` and `catalog.Describe` so the model can search, inspect, then read an operation.
+Register the returned tool's `Name`, `Description`, and `Parameters` with your model provider. When the model selects it, pass its raw JSON arguments to `Handler` and add the returned text to the next model turn. Register similar read-only wrappers for `catalog.Search`, `catalog.Describe`, and `catalog.DescribeSchema` so the model can search, inspect an operation, inspect only the relevant schemas, then read an operation.
 
 `internal/tools` can only be imported by code in this Go module. An external Go module must adapt the public `appstoreconnect` package to its own harness's tool interface, or use the MCP server. The current example loop in `internal/agents/simpleagentwithloop` does not register or execute tool calls, so it needs a model integration and tool-dispatch loop before it can use this wrapper.
 
@@ -204,12 +204,13 @@ This route also works for agents written in other languages. External Go modules
 | Tool | Purpose |
 | --- | --- |
 | `asc_search_operations` | Find operations by search terms and optional HTTP method. |
-| `asc_describe_operation` | Inspect an operation's parameters, request body, and schemas. |
+| `asc_describe_operation` | Inspect an operation's method, path, parameters, request body, and response references. |
+| `asc_describe_schema` | Inspect one named component schema referenced by an operation. |
 | `asc_read` | Execute a GET operation. |
 | `asc_write` | Execute POST/PATCH when writes are enabled. |
 | `asc_delete` | Execute DELETE when deletes are enabled. |
 
-For agent-selected operations, use **search → describe → execute**. Use an exact returned `operationId` and the parameters described by its schema. Do not invent operation IDs.
+For agent-selected operations, use **search → describe operation → describe relevant schemas → execute**. Use exact returned `operationId` and schema names. `asc_read` is the read-only tool; inspect request schemas before calling `asc_write` or `asc_delete`. Description results are capped at 32 KiB and fail clearly when a single operation or schema cannot fit.
 
 ### MCP environment
 

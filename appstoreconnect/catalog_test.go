@@ -1,6 +1,7 @@
 package appstoreconnect
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -27,7 +28,7 @@ func TestCatalogSearchAndDescribe(t *testing.T) {
 		t.Fatalf("deterministic filter: %#v", got)
 	}
 	d, err := c.Describe("apps_get")
-	if err != nil || d["operation"] == nil {
+	if err != nil || d["operation"] == nil || d["method"] != "GET" || d["path"] != "/v1/apps/{id}" {
 		t.Fatalf("describe: %v %#v", err, d)
 	}
 }
@@ -57,6 +58,18 @@ func TestCheckedInAppleSpecCompatibility(t *testing.T) {
 	if err != nil || mutation.Method != "PATCH" {
 		t.Fatalf("mutation: %#v %v", mutation, err)
 	}
+	for operationID := range c.operations {
+		if _, err := c.Describe(operationID); err != nil {
+			t.Fatalf("describe checked-in operation %q: %v", operationID, err)
+		}
+	}
+	components, _ := c.raw["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	for name := range schemas {
+		if _, err := c.DescribeSchema(name); err != nil {
+			t.Fatalf("describe checked-in schema %q: %v", name, err)
+		}
+	}
 }
 
 func TestCatalogRejectsMalformedMissingAndDuplicateOperationIDs(t *testing.T) {
@@ -73,7 +86,7 @@ func TestCatalogRejectsMalformedMissingAndDuplicateOperationIDs(t *testing.T) {
 	}
 }
 
-func TestDescribeIncludesTransitiveCyclicSchemas(t *testing.T) {
+func TestDescribeLeavesComponentReferencesUnexpanded(t *testing.T) {
 	spec := `{"openapi":"3.0.1","info":{"title":"cycle","version":"1"},"paths":{"/x":{"get":{"operationId":"cycle_get","responses":{"200":{"description":"ok","content":{"application/json":{"schema":{"$ref":"#/components/schemas/A"}}}}}}}},"components":{"schemas":{"A":{"type":"object","properties":{"b":{"$ref":"#/components/schemas/B"}}},"B":{"type":"object","properties":{"a":{"$ref":"#/components/schemas/A"}}}}}}`
 	c, err := LoadCatalog([]byte(spec))
 	if err != nil {
@@ -83,12 +96,58 @@ func TestDescribeIncludesTransitiveCyclicSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schemas := d["schemas"].(map[string]any)
-	if len(schemas) != 2 || schemas["A"] == nil || schemas["B"] == nil {
-		t.Fatalf("schemas %#v", schemas)
+	if _, ok := d["schemas"]; ok {
+		t.Fatalf("describe recursively expanded schemas: %#v", d)
+	}
+	operation := d["operation"].(map[string]any)
+	responses := operation["responses"].(map[string]any)
+	response := responses["200"].(map[string]any)
+	content := response["content"].(map[string]any)
+	mediaType := content["application/json"].(map[string]any)
+	schema := mediaType["schema"].(map[string]any)
+	if schema["$ref"] != "#/components/schemas/A" {
+		t.Fatalf("operation reference was expanded: %#v", schema)
 	}
 	if _, err := c.Describe("unknown"); err == nil {
 		t.Fatal("unknown operation described")
+	}
+}
+
+func TestDescribeSchemaReturnsNamedSchemaWithoutExpansion(t *testing.T) {
+	spec := `{"openapi":"3.0.1","info":{"title":"cycle","version":"1"},"paths":{"/x":{"get":{"operationId":"cycle_get","responses":{"200":{"description":"ok"}}}}},"components":{"schemas":{"A":{"type":"object","properties":{"b":{"$ref":"#/components/schemas/B"}}},"B":{"type":"object","properties":{"a":{"$ref":"#/components/schemas/A"}}}}}}`
+	c, err := LoadCatalog([]byte(spec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	description, err := c.DescribeSchema("A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if description["name"] != "A" {
+		t.Fatalf("schema name: %#v", description)
+	}
+	schema := description["schema"].(map[string]any)
+	properties := schema["properties"].(map[string]any)
+	if properties["b"].(map[string]any)["$ref"] != "#/components/schemas/B" {
+		t.Fatalf("schema reference was expanded: %#v", schema)
+	}
+	if _, err := c.DescribeSchema("unknown"); err == nil {
+		t.Fatal("unknown schema described")
+	}
+}
+
+func TestDescriptionsRejectOversizedResults(t *testing.T) {
+	large := strings.Repeat("x", maxDescriptionBytes)
+	spec := fmt.Sprintf(`{"openapi":"3.0.1","info":{"title":"large","version":"1"},"paths":{"/x":{"get":{"operationId":"large_operation","description":%q,"responses":{"200":{"description":"ok"}}}}},"components":{"schemas":{"Large":{"type":"string","description":%q}}}}`, large, large)
+	c, err := LoadCatalog([]byte(spec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Describe("large_operation"); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("oversized operation: %v", err)
+	}
+	if _, err := c.DescribeSchema("Large"); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("oversized schema: %v", err)
 	}
 }
 

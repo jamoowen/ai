@@ -11,9 +11,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const testSpec = `{"openapi":"3.0.1","info":{"title":"test","version":"1"},"security":[{"itc-bearer-token":[]}],"components":{"securitySchemes":{"itc-bearer-token":{"type":"http","scheme":"bearer"}}},"paths":{"/v1/apps":{"get":{"operationId":"apps_getCollection","responses":{"200":{"description":"ok"}}}}}}`
+const testSpec = `{"openapi":"3.0.1","info":{"title":"test","version":"1"},"security":[{"itc-bearer-token":[]}],"components":{"securitySchemes":{"itc-bearer-token":{"type":"http","scheme":"bearer"}},"schemas":{"App":{"type":"object","properties":{"name":{"type":"string"}}}}},"paths":{"/v1/apps":{"get":{"operationId":"apps_getCollection","responses":{"200":{"description":"ok","content":{"application/json":{"schema":{"$ref":"#/components/schemas/App"}}}}}}}}}`
 
-func TestProtocolListsFiveToolsAndGatesMutations(t *testing.T) {
+func TestProtocolListsSixToolsAndGatesMutations(t *testing.T) {
 	catalog, err := appstoreconnect.LoadCatalog([]byte(testSpec))
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestProtocolListsFiveToolsAndGatesMutations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 5 {
+	if len(tools.Tools) != 6 {
 		t.Fatalf("got %d tools", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
@@ -47,7 +47,7 @@ func TestProtocolListsFiveToolsAndGatesMutations(t *testing.T) {
 			t.Fatalf("%s has no annotations", tool.Name)
 		}
 		switch tool.Name {
-		case "asc_search_operations", "asc_describe_operation":
+		case "asc_search_operations", "asc_describe_operation", "asc_describe_schema":
 			if !a.ReadOnlyHint || a.OpenWorldHint == nil || *a.OpenWorldHint {
 				t.Fatalf("bad local annotations for %s", tool.Name)
 			}
@@ -76,6 +76,10 @@ func TestProtocolListsFiveToolsAndGatesMutations(t *testing.T) {
 	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_describe_operation", Arguments: map[string]any{"operationId": "apps_getCollection"}})
 	if err != nil || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "operationId") {
 		t.Fatalf("describe routing: %#v %v", result, err)
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_describe_schema", Arguments: map[string]any{"name": "App"}})
+	if err != nil || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "name") {
+		t.Fatalf("schema describe routing: %#v %v", result, err)
 	}
 	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_read", Arguments: map[string]any{"operationId": "apps_getCollection"}})
 	if err != nil || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "data") {

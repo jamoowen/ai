@@ -22,10 +22,13 @@ type searchInput struct {
 type describeInput struct {
 	OperationID string `json:"operationId"`
 }
+type describeSchemaInput struct {
+	Name string `json:"name"`
+}
 type invokeInput = appstoreconnect.Invocation
 
 func New(cfg Config) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "appstoreconnect-mcp", Version: "v1"}, &mcp.ServerOptions{Instructions: "Use search, then describe, then invoke. Never invent operation IDs. Inspect schemas before mutations. Paginate explicitly."})
+	s := mcp.NewServer(&mcp.Implementation{Name: "appstoreconnect-mcp", Version: "v1"}, &mcp.ServerOptions{Instructions: "Use search, then describe the operation, then describe relevant schemas as needed, then invoke. Never invent operation IDs or schema names. Inspect request schemas before mutations. Paginate explicitly."})
 	closed, open, destructive := false, true, true
 	localRead := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closed}
 	remoteRead := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &open}
@@ -33,8 +36,15 @@ func New(cfg Config) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "asc_search_operations", Description: "Search App Store Connect OpenAPI operations", Annotations: localRead}, func(_ context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, any, error) {
 		return jsonResult(map[string]any{"operations": cfg.Catalog.Search(in.Query, in.Method, in.Limit)})
 	})
-	mcp.AddTool(s, &mcp.Tool{Name: "asc_describe_operation", Description: "Describe an operation and its referenced schemas", Annotations: localRead}, func(_ context.Context, _ *mcp.CallToolRequest, in describeInput) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(s, &mcp.Tool{Name: "asc_describe_operation", Description: "Describe an operation's method, path, effective parameters, request body, and responses", Annotations: localRead}, func(_ context.Context, _ *mcp.CallToolRequest, in describeInput) (*mcp.CallToolResult, any, error) {
 		v, e := cfg.Catalog.Describe(in.OperationID)
+		if e != nil {
+			return nil, nil, e
+		}
+		return jsonResult(v)
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "asc_describe_schema", Description: "Describe one named App Store Connect component schema", Annotations: localRead}, func(_ context.Context, _ *mcp.CallToolRequest, in describeSchemaInput) (*mcp.CallToolResult, any, error) {
+		v, e := cfg.Catalog.DescribeSchema(in.Name)
 		if e != nil {
 			return nil, nil, e
 		}
