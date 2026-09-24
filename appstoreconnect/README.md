@@ -193,7 +193,7 @@ Keep credentials in your application, never in model tool arguments.
 
 ### Already using an MCP framework?
 
-Use the server from section 1 instead of importing the Go package. Launch the binary through your framework's stdio MCP client and supply the environment values below. Keep one session open for the agent loop, discover its tools, and forward tool calls and results. Check both transport errors and the tool result's `isError` field.
+Use the server from section 1 instead of importing the Go package. Launch the binary through your framework's stdio MCP client and supply the environment values below. Keep one session open for the agent loop, discover its tools, and forward tool calls and results. Check both transport errors and the tool result's `isError` field. An Apple API error result includes its status, content type, and safe rate-limit/request-ID headers, but never its raw response body.
 
 This route also works for agents written in other languages. External Go modules should use the public package or the MCP binary, not `internal/appstoreconnectmcp`.
 

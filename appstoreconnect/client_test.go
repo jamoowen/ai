@@ -217,8 +217,9 @@ func TestClientResponseRepresentations(t *testing.T) {
 	if _, err = invoke(200, "application/octet-stream", "abc", 0); err == nil {
 		t.Fatal("binary body accepted")
 	}
-	if _, err = invoke(200, "text/plain", "long", 2); err == nil {
-		t.Fatal("oversize body accepted")
+	r, err = invoke(429, "text/plain", "long", 2)
+	if err == nil || r == nil || r.Status != 429 || r.ContentType != "text/plain" || r.Headers["X-Request-Id"] != "id" || r.Body != nil {
+		t.Fatalf("oversize body lost response metadata: response=%#v err=%v", r, err)
 	}
 	if _, err = invoke(400, "application/json", `{"error":"bad"}`, 0); err == nil || !strings.Contains(err.Error(), "bad") {
 		t.Fatal("non-2xx accepted")

@@ -124,18 +124,18 @@ func (c *Client) Invoke(ctx context.Context, class OperationClass, in Invocation
 		return nil, err
 	}
 	defer resp.Body.Close()
+	out := &Response{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Headers: safeHeaders(resp.Header)}
 	limit := c.MaxResponseBytes
 	if limit <= 0 {
 		limit = 1 << 20
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	if int64(len(b)) > limit {
-		return nil, fmt.Errorf("response exceeds %d byte limit", limit)
+		return out, fmt.Errorf("response exceeds %d byte limit", limit)
 	}
-	out := &Response{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Headers: safeHeaders(resp.Header)}
 	parsed, err := parseResponseBody(out.ContentType, b)
 	if err != nil {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {

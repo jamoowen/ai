@@ -95,6 +95,68 @@ func TestProtocolListsSixToolsAndGatesMutations(t *testing.T) {
 	}
 }
 
+func TestProtocolReturnsSafeMetadataForAppleErrors(t *testing.T) {
+	catalog, err := appstoreconnect.LoadCatalog([]byte(testSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTransport := roundTrip(func(*http.Request) (*http.Response, error) {
+		h := make(http.Header)
+		h.Set("Content-Type", "application/json")
+		h.Set("Retry-After", "60")
+		h.Set("X-Rate-Limit", "user-hour-lim:3500;user-hour-rem:0;")
+		h.Set("X-Request-Id", "request-id")
+		h.Set("Set-Cookie", "secret")
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Header: h, Body: io.NopCloser(strings.NewReader(`{"error":"` + strings.Repeat("x", 8<<10) + `"}`))}, nil
+	})
+	server := New(Config{Catalog: catalog, Client: &appstoreconnect.Client{Catalog: catalog, Tokens: token("x"), HTTPClient: &http.Client{Transport: clientTransport}}})
+	st, ct := mcp.NewInMemoryTransports()
+	if _, err := server.Connect(context.Background(), st, nil); err != nil {
+		t.Fatal(err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil)
+	session, err := client.Connect(context.Background(), ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "asc_read", Arguments: map[string]any{"operationId": "apps_getCollection"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("429 result was not marked as an error")
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("unexpected error content: %#v", result.Content)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("error content type: %T", result.Content[0])
+	}
+	if len(text.Text) > 5<<10 || !strings.Contains(text.Text, "HTTP 429") || !strings.Contains(text.Text, "(truncated)") || strings.Contains(text.Text, "Set-Cookie") {
+		t.Fatalf("error text was not bounded and sanitized: %q", text.Text)
+	}
+	structured, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("structuredContent not an object: %#v", result.StructuredContent)
+	}
+	response, ok := structured["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("response metadata missing: %#v", structured)
+	}
+	if response["status"] != float64(http.StatusTooManyRequests) || response["contentType"] != "application/json" {
+		t.Fatalf("response metadata: %#v", response)
+	}
+	headers, ok := response["headers"].(map[string]any)
+	if !ok || headers["Retry-After"] != "60" || headers["X-Rate-Limit"] != "user-hour-lim:3500;user-hour-rem:0;" || headers["X-Request-Id"] != "request-id" {
+		t.Fatalf("safe headers missing: %#v", response["headers"])
+	}
+	if _, leaked := headers["Set-Cookie"]; leaked {
+		t.Fatalf("unsafe header leaked: %#v", headers)
+	}
+}
+
 type token string
 
 func (t token) Token(context.Context) (string, error) { return string(t), nil }

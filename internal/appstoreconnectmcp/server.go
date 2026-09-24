@@ -66,10 +66,30 @@ func addInvoke(s *mcp.Server, name string, ann *mcp.ToolAnnotations, class appst
 		}
 		v, e := c.Invoke(ctx, class, in)
 		if e != nil {
+			if v != nil {
+				return invokeErrorResult(v, e)
+			}
 			return nil, nil, e
 		}
 		return jsonResult(v)
 	})
+}
+
+func invokeErrorResult(response *appstoreconnect.Response, err error) (*mcp.CallToolResult, any, error) {
+	result := map[string]any{
+		"error": err.Error(),
+		"response": map[string]any{
+			"status":      response.Status,
+			"contentType": response.ContentType,
+			"headers":     response.Headers,
+		},
+	}
+	toolResult, structured, marshalErr := jsonResult(result)
+	if marshalErr != nil {
+		return nil, nil, marshalErr
+	}
+	toolResult.IsError = true
+	return toolResult, structured, nil
 }
 
 func jsonResult(v any) (*mcp.CallToolResult, any, error) {
