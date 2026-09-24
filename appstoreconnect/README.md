@@ -1,36 +1,75 @@
 # App Store Connect MCP
 
-`appstoreconnect-mcp` is a local STDIO [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for Apple's App Store Connect API. It accepts an OpenAPI operation ID, parameters, and JSON body; it resolves and validates the request against the checked-in specification, pins the Apple destination, and creates the bearer JWT internally. Models never receive a general HTTP client or your Apple credentials.
+`appstoreconnect-mcp` lets an AI agent work with Apple's App Store Connect API safely. It knows Apple's OpenAPI specification, validates every request, sends it only to Apple, and creates the Apple login token itself. Your model does not receive a general HTTP tool or your Apple credentials.
 
-Choose the integration that fits your application:
+Choose the path that fits your agent:
 
-- **Codex or Claude Code:** configure either MCP host to launch the local binary.
-- **A custom agent using MCP:** launch the binary from your agent and adapt its discovered MCP tools to your model provider's tool format.
-- **A Go agent loop:** import the public `appstoreconnect` package and call its catalog, token, and client primitives directly.
+- **Codex or Claude Code:** configure the MCP host to start this local server.
+- **Custom agent with MCP:** start the binary from your agent and adapt its discovered tools to your model provider.
+- **Go-only agent loop:** import the public `appstoreconnect` package and use its catalog, token source, and client directly.
 
-The MCP server exposes five tools: `asc_search_operations`, `asc_describe_operation`, `asc_read`, `asc_write`, and `asc_delete`.
+The server provides five tools: `asc_search_operations`, `asc_describe_operation`, `asc_read`, `asc_write`, and `asc_delete`.
 
 ## Create Apple credentials
 
-Before generating a key, the **Account Holder** must request App Store Connect API access in **Users and Access → Integrations → App Store Connect API → Request Access**. Apple reviews the request. Once access is enabled, choose the least-privileged key type and role that fits the agent's job. Apple's [App Store Connect API setup guide](https://developer.apple.com/help/app-store-connect/get-started/app-store-connect-api) explains the access process.
+Follow these steps before configuring the MCP.
 
-### Team key
+### 1. Request API access
 
-An Account Holder or Admin creates a team key in **Users and Access → Integrations → Team Keys**. Choose its role when generating it. A team key applies across all apps in the account according to that role; it cannot be restricted to selected apps.
+The **Account Holder** must request App Store Connect API access in **Users and Access → Integrations → App Store Connect API → Request Access**. Apple reviews the request before keys can be created. See Apple's [API setup guide](https://developer.apple.com/help/app-store-connect/get-started/app-store-connect-api).
 
-Record the key's **Key ID** and the account's **Issuer ID** from the Integrations page. Use both values with this server.
+### 2. Choose the right role
 
-### Individual key
+Use the least powerful role that can do the job. If your agent must submit an app for review and release an approved version, use **App Manager**.
 
-An eligible user creates an individual key in **profile → Edit Profile → Individual API Key → Generate Key**. It inherits that user's App Store Connect permissions and app access, and each user can have one active individual key. It is useful when access should follow a particular user's scope.
+- **App Manager** is the least-privileged role that can submit apps for review and release them.
+- **Admin** and **Account Holder** also work, but give the key more access.
+- **Developer** can upload builds, but cannot submit an app or release it.
 
-Use its **Key ID**, but leave `ASC_ISSUER_ID` unset. Apple requires individual-key JWTs to use `sub=user` rather than a team issuer; this server selects that form when the issuer setting is empty. See Apple's [key-creation](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api) and [token-generation](https://developer.apple.com/documentation/appstoreconnectapi/generating-tokens-for-api-requests) documentation.
+An Account Holder or Admin gives a user their role and app access. When creating a team key, select its role during key creation.
 
-### Protect the private key
+### 3. Choose an individual or team key
 
-Apple offers the downloaded `.p8` private key only once and does not keep a replacement copy. Keep it outside this repository, do not share it or put it in client-side code, and revoke it if it is lost or compromised. This repository ignores `*.p8` as a guardrail, not as a safe storage strategy.
+Both key types can submit and release apps when they have App Manager-level permission. The difference is who owns the key and which apps it can reach.
 
-For example, store it in a private directory and limit its file permissions:
+| If you are doing this... | Choose | Why |
+| --- | --- | --- |
+| Running an agent locally for yourself | **Individual App Manager key** | Recommended for personal use. It follows your user role and app access, so it can be limited to the apps you can access. |
+| Running shared CI or an organization-owned service | **Team App Manager key** | It does not depend on one person's account and lets you manage separate service credentials. It reaches every app in the account. |
+
+Individual keys:
+
+- Inherit the user's App Store Connect role and app access.
+- Can be limited through that user's app access.
+- Are limited to one active individual key per user.
+- Cannot use Provisioning, Sales and Finance, or `notaryTool`.
+
+Team keys:
+
+- Can be managed as separate credentials for people or services.
+- Apply to every app in the App Store Connect account; Apple does not support app-scoped team keys.
+
+For most personal/local agent setups, start with an **individual App Manager key**. For shared unattended automation, use a **team App Manager key** and remember that it can reach all account apps. Apple's [API key documentation](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api) describes both kinds of key.
+
+### 4. Create the key and record its values
+
+| Key type | Where to create it | Values to keep |
+| --- | --- | --- |
+| Individual | **Profile → Edit Profile → Individual API Key → Generate Key** | Key ID and the downloaded `.p8` file. Do **not** use an Issuer ID. |
+| Team | **Users and Access → Integrations → Team Keys → Generate API Key** | Key ID, Issuer ID from the Integrations page, and the downloaded `.p8` file. Choose the App Manager role while creating the key. |
+
+Individual-key tokens use `sub=user`, not an issuer. This server selects that form when `ASC_ISSUER_ID` is empty. See Apple's [token-generation documentation](https://developer.apple.com/documentation/appstoreconnectapi/generating-tokens-for-api-requests).
+
+### 5. Protect the private key
+
+Apple lets you download the `.p8` private key once. It cannot give you another copy later.
+
+- Keep the `.p8` file outside this repository, even though `*.p8` is ignored here.
+- Never commit, share, or put the key in client-side code.
+- Restrict its file permissions.
+- Revoke the key in App Store Connect if it is lost or exposed.
+
+For example:
 
 ```sh
 chmod 600 /absolute/private/path/AuthKey_ABC123DEFG.p8
@@ -38,76 +77,80 @@ chmod 600 /absolute/private/path/AuthKey_ABC123DEFG.p8
 
 ## Configure the environment
 
-Export the values before starting an MCP host or custom agent. Use absolute paths: an MCP host may start the binary from a different working directory.
+Set these values in the shell that starts Codex, Claude Code, or your own agent. Use absolute paths because an MCP host may start the binary from another directory.
+
+### Individual key — recommended for personal use
 
 ```sh
 export ASC_KEY_ID="your-key-id"
-export ASC_ISSUER_ID="your-team-issuer-id" # team keys only
+unset ASC_ISSUER_ID
 export ASC_PRIVATE_KEY_PATH="/absolute/private/path/AuthKey_your-key-id.p8"
 export ASC_OPENAPI_SOURCE="/absolute/path/to/ai/api/apple/app-store-connect.openapi.json"
 ```
 
-For an individual key:
+### Team key — for shared or unattended automation
 
 ```sh
-unset ASC_ISSUER_ID
+export ASC_KEY_ID="your-key-id"
+export ASC_ISSUER_ID="your-team-issuer-id"
+export ASC_PRIVATE_KEY_PATH="/absolute/private/path/AuthKey_your-key-id.p8"
+export ASC_OPENAPI_SOURCE="/absolute/path/to/ai/api/apple/app-store-connect.openapi.json"
 ```
 
-| Variable | Purpose |
+| Variable | What it is |
 | --- | --- |
-| `ASC_KEY_ID` | Apple API key ID. Required. |
-| `ASC_ISSUER_ID` | Apple team issuer ID. Required for a team key; unset for an individual key. |
-| `ASC_PRIVATE_KEY_PATH` | Absolute path to the private `.p8` key. Required. |
-| `ASC_OPENAPI_SOURCE` | OpenAPI document path or HTTPS URL. Prefer an absolute path to the checked-in [`../api/apple/app-store-connect.openapi.json`](../api/apple/app-store-connect.openapi.json). The public raw URL is `https://raw.githubusercontent.com/jamoowen/ai/refs/heads/main/api/apple/app-store-connect.openapi.json`. |
+| `ASC_KEY_ID` | Your Apple API key ID. Required. |
+| `ASC_ISSUER_ID` | Your Apple team Issuer ID. Use it only for a team key. |
+| `ASC_PRIVATE_KEY_PATH` | Absolute path to the `.p8` file. Required. |
+| `ASC_OPENAPI_SOURCE` | The OpenAPI document path or HTTPS URL. Prefer the checked-in [`../api/apple/app-store-connect.openapi.json`](../api/apple/app-store-connect.openapi.json). The public copy is `https://raw.githubusercontent.com/jamoowen/ai/refs/heads/main/api/apple/app-store-connect.openapi.json`. |
 
-Reads are available by default. Enable mutations only when the host is authorized to perform them:
+Reads are enabled by default. Changes to your App Store Connect data require separate, deliberate opt-ins:
 
-```sh
-export ASC_ALLOW_WRITES=true
-export ASC_ALLOW_DELETES=true
-export ASC_MAX_RESPONSE_BYTES=1048576 # optional; default is 1 MiB
-```
-
-`ASC_ALLOW_WRITES` permits POST and PATCH through `asc_write`; `ASC_ALLOW_DELETES` separately permits DELETE through `asc_delete`.
+- Set `ASC_ALLOW_WRITES=true` to allow POST and PATCH through `asc_write`.
+- Set `ASC_ALLOW_DELETES=true` to allow DELETE through `asc_delete`.
+- Optionally set `ASC_MAX_RESPONSE_BYTES=1048576` to change the response-size limit; the default is 1 MiB.
 
 ## Build and run
 
-Build the local server from the repository root:
+From the repository root, build the local server:
 
 ```sh
 go build -o bin/appstoreconnect-mcp ./cmd/appstoreconnect-mcp
 ```
 
-Running `bin/appstoreconnect-mcp` directly starts a STDIO protocol server and waits for MCP messages. It is not an interactive shell command; normally Codex, Claude Code, or your custom agent launches it and owns its standard input and output.
+If you run `bin/appstoreconnect-mcp` yourself, it waits for MCP/JSON-RPC messages on standard input. It is not an interactive command. Normally Codex, Claude Code, or your custom agent starts the binary and communicates with it.
 
 ## Connect Codex
 
-Codex supports local STDIO MCP servers through `~/.codex/config.toml` or a trusted project's `.codex/config.toml`. Configure an absolute binary path and forward only locally exported secrets. See the official [Codex MCP documentation](https://developers.openai.com/codex/mcp).
-
-For a team key:
+Codex can start local STDIO MCP servers from `~/.codex/config.toml` or a trusted project's `.codex/config.toml`. This recommended individual-key configuration forwards only the required local secrets. See the official [Codex MCP documentation](https://developers.openai.com/codex/mcp).
 
 ```toml
 [mcp_servers.app_store_connect]
 command = "/absolute/path/to/ai/bin/appstoreconnect-mcp"
-env_vars = ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY_PATH"]
+env_vars = ["ASC_KEY_ID", "ASC_PRIVATE_KEY_PATH"]
 
 [mcp_servers.app_store_connect.env]
 ASC_OPENAPI_SOURCE = "/absolute/path/to/ai/api/apple/app-store-connect.openapi.json"
 ```
 
-For an individual key, omit `ASC_ISSUER_ID` from `env_vars`. Add the mutation variables only when you intentionally want them available to this server.
+For a team key, add `"ASC_ISSUER_ID"` to `env_vars`. Add write or delete variables only when you intentionally want this server to make those changes.
 
-Verify the registration with `codex mcp list`; inside Codex, use `/mcp` to inspect its connection and tools.
+Verify the registration:
+
+```sh
+codex mcp list
+```
+
+Inside Codex, use `/mcp` to inspect the connection and its tools.
 
 ## Connect Claude Code
 
-Claude Code can register a local STDIO server with `claude mcp add [options] <name> -- <command> [args...]`. The `--` separates Claude Code options from the subprocess command. This project-local team-key configuration uses explicit STDIO transport and forwards exported variables:
+Claude Code can register a local STDIO server with `claude mcp add`. This recommended individual-key command keeps the registration local to this project. The one `--env` option forwards all three variables; `--` separates Claude Code options from the server command. See the official [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
 
 ```sh
 claude mcp add \
   --scope local \
   --env ASC_KEY_ID="$ASC_KEY_ID" \
-        ASC_ISSUER_ID="$ASC_ISSUER_ID" \
         ASC_PRIVATE_KEY_PATH="$ASC_PRIVATE_KEY_PATH" \
         ASC_OPENAPI_SOURCE="$ASC_OPENAPI_SOURCE" \
   --transport stdio \
@@ -115,9 +158,18 @@ claude mcp add \
   /absolute/path/to/ai/bin/appstoreconnect-mcp
 ```
 
-For an individual key, omit the `ASC_ISSUER_ID=...` assignment. `--scope local` keeps the registration private to this project; use another scope only if that broader availability is deliberate. Verify it with `claude mcp get app-store-connect` or `claude mcp list`, and use `/mcp` in Claude Code for connection status.
+For a team key, add `ASC_ISSUER_ID="$ASC_ISSUER_ID"` to that same `--env` list. Use a broader scope only when you deliberately want the server available outside this project.
 
-For a shareable project configuration, a repository-root `.mcp.json` can reference each developer's environment without committing resolved secrets:
+Verify the registration:
+
+```sh
+claude mcp get app-store-connect
+claude mcp list
+```
+
+Inside Claude Code, use `/mcp` for connection status.
+
+For a shareable project configuration, a repository-root `.mcp.json` can refer to each developer's environment without committing resolved secrets:
 
 ```json
 {
@@ -136,17 +188,25 @@ For a shareable project configuration, a repository-root `.mcp.json` can referen
 }
 ```
 
-Project-scoped servers require user approval before use. See the official [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp) for scopes and configuration details.
+Here, a blank `ASC_ISSUER_ID` means an individual key. Project-scoped servers require user approval before use.
 
 ## Use the MCP tools
 
+| Tool | Use it for |
+| --- | --- |
+| `asc_search_operations` | Find an App Store Connect operation from plain-language words and an optional HTTP method. |
+| `asc_describe_operation` | See an operation's parameters, request body, and schemas. |
+| `asc_read` | Run a GET operation. |
+| `asc_write` | Run a POST or PATCH operation when writes are enabled. |
+| `asc_delete` | Run a DELETE operation when deletes are enabled. |
+
 Use the tools in this order:
 
-1. Call `asc_search_operations` with a task-oriented query and optional HTTP method.
-2. Call `asc_describe_operation` for the returned `operationId`; inspect its parameters, request body, and referenced schemas.
-3. Invoke that exact operation through `asc_read`, `asc_write`, or `asc_delete`.
+1. Call `asc_search_operations` with what you want to do and, if useful, an HTTP method.
+2. Call `asc_describe_operation` for the returned `operationId`.
+3. Inspect the parameters and schemas, then call `asc_read`, `asc_write`, or `asc_delete` with that exact ID.
 
-Never invent an operation ID. Inspect schemas before mutations, and request each page explicitly: the server does not perform automatic pagination or high-level workflows.
+Never invent an operation ID. Inspect schemas before a mutation, and request every page explicitly: the server does not automatically paginate or perform high-level workflows.
 
 For example, search first:
 
@@ -154,13 +214,13 @@ For example, search first:
 {"query":"list apps","method":"GET","limit":10}
 ```
 
-Then pass the selected identifier to `asc_describe_operation`:
+Then describe the selected operation:
 
 ```json
 {"operationId":"apps_getCollection"}
 ```
 
-An invocation has this shape; include only the parameters required by the described operation:
+Then invoke it. Include only the parameters the description requires:
 
 ```json
 {
@@ -169,25 +229,25 @@ An invocation has this shape; include only the parameters required by the descri
 }
 ```
 
-`asc_read` accepts GET operations only, `asc_write` accepts POST and PATCH operations only, and `asc_delete` accepts DELETE operations only. The server validates paths, query parameters, request bodies, and the destination before sending a request to Apple.
+The server validates the path, query parameters, request body, and destination before it sends anything to Apple.
 
 ## Use the MCP from a custom agent
 
-For an agent framework that already supports MCP, point it at the built binary and pass the same environment variables. For a framework with its own tool abstraction, use this adapter pattern:
+If your agent framework already supports MCP, point it at the built binary and pass the same environment variables. If it has its own tool abstraction, use this pattern:
 
-1. Keep one MCP session alive for the agent loop.
-2. Discover tools when the session starts.
-3. Map each tool's name, description, and `InputSchema` into the model provider's tool definition.
-4. Forward the model's chosen tool name and JSON arguments to MCP unchanged.
-5. Check both the transport/protocol error and the tool result's error flag, then append the returned content to the next model turn.
+1. Start one MCP session when the agent loop starts, and keep it alive for the loop.
+2. Discover the server's tools.
+3. Register each tool's name, description, and `InputSchema` with your model provider.
+4. Send the model's selected tool name and JSON arguments to MCP unchanged.
+5. Check the Go/transport error and the MCP result's `IsError` flag. Add the returned content to the next model turn.
 
-Preserve MCP tool annotations in your model-facing policy. In particular, require an explicit authorization or confirmation step before `asc_write` and `asc_delete`.
+Keep MCP tool annotations in your own policy. Require explicit authorization or confirmation before `asc_write` or `asc_delete`.
 
-The public integration boundary is the executable. An external module cannot import this repository's `internal/appstoreconnectmcp` package.
+External modules should launch the binary. They cannot import this repository's `internal/appstoreconnectmcp` package because Go's `internal` rule makes it private to this module.
 
 ### Go MCP SDK example
 
-This example uses `github.com/modelcontextprotocol/go-sdk v1.8.0` to start a local server and call a discovered tool. Keep the session for the lifetime of the agent loop, and close it when the loop ends.
+This example uses `github.com/modelcontextprotocol/go-sdk v1.8.0` to start the local server and call a discovered tool. Keep the session for the life of the agent loop, then close it.
 
 ```go
 package main
@@ -206,7 +266,7 @@ import (
 func main() {
 	ctx := context.Background()
 	cmd := exec.Command("/absolute/path/to/ai/bin/appstoreconnect-mcp")
-	cmd.Env = os.Environ() // Includes the exported ASC_* variables.
+	cmd.Env = os.Environ() // Includes exported ASC_* variables.
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "my-agent", Version: "v1.0.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
@@ -244,11 +304,11 @@ func main() {
 }
 ```
 
-`session.Tools` handles tool-list pagination. If your agent needs finer control, use `session.ListTools`; for every invocation, check the Go `error` and `result.IsError`. The [Go MCP SDK v1.8.0 documentation](https://github.com/modelcontextprotocol/go-sdk/tree/v1.8.0) covers the protocol and transports.
+`session.Tools` handles tool-list pagination. If you need finer control, use `session.ListTools`. For every call, check both the Go `error` and `result.IsError`. The [Go MCP SDK v1.8.0 documentation](https://github.com/modelcontextprotocol/go-sdk/tree/v1.8.0) explains the protocol and transports.
 
 ## Use the Go primitives directly
 
-For Go-only agent loops, import `github.com/jamoowen/ai/appstoreconnect`. The public package gives you a catalog, a token source, and a constrained client without requiring MCP.
+For a Go-only agent loop, import `github.com/jamoowen/ai/appstoreconnect`. It gives you a catalog, token source, and constrained client without MCP.
 
 ```go
 package main
@@ -302,17 +362,17 @@ func main() {
 }
 ```
 
-`Client.Invoke` can return a non-nil response alongside an error, such as for a non-2xx Apple response, so inspect both. The direct package constrains operations by `ReadOperation`, `WriteOperation`, and `DeleteOperation`, but it does not enforce `ASC_ALLOW_WRITES` or `ASC_ALLOW_DELETES`. Direct users own authorization and confirmation controls around `WriteOperation` and `DeleteOperation`.
+`Client.Invoke` can return both a response and an error, such as when Apple returns a non-2xx status. Check both. The package limits calls to `ReadOperation`, `WriteOperation`, and `DeleteOperation`, but it does **not** enforce `ASC_ALLOW_WRITES` or `ASC_ALLOW_DELETES`. Your direct agent loop must require authorization and confirmation before `WriteOperation` or `DeleteOperation`.
 
 ## Troubleshooting and limits
 
-- **The schema cannot be found:** set `ASC_OPENAPI_SOURCE` to an absolute checked-in path or an HTTPS URL. The default is relative to the binary's working directory.
-- **Apple rejects authentication:** use `ASC_ISSUER_ID` only for a team key. Leave it unset for an individual key, and ensure the `.p8` file corresponds to `ASC_KEY_ID`.
-- **A mutation says it is disabled:** set the appropriate exact opt-in, `ASC_ALLOW_WRITES=true` or `ASC_ALLOW_DELETES=true`, in the process that launches the server.
-- **Output looks like JSON-RPC:** standard output is MCP protocol traffic. Do not add ordinary logs to it; use standard error for diagnostics.
-- **A response body is rejected:** the server returns JSON values and text only; binary response bodies are unsupported.
+- **The schema cannot be found:** set `ASC_OPENAPI_SOURCE` to an absolute checked-in path or HTTPS URL. The default is relative to the binary's working directory.
+- **Apple rejects authentication:** use `ASC_ISSUER_ID` only for a team key. Leave it unset for an individual key, and check that the `.p8` file matches `ASC_KEY_ID`.
+- **A mutation is disabled:** set `ASC_ALLOW_WRITES=true` or `ASC_ALLOW_DELETES=true` in the process that starts the server.
+- **Output looks like JSON-RPC:** that is normal MCP protocol traffic. Do not write ordinary logs to standard output; write diagnostics to standard error.
+- **A response body is rejected:** the server supports JSON values and text only, not binary response bodies.
 
-The current server intentionally has no automatic pagination, embeddings or semantic search, high-level workflow tools, binary upload/download support, remote or streamable MCP hosting, or live Apple integration tests.
+The server intentionally does not provide automatic pagination, embeddings or semantic search, high-level workflow tools, binary upload/download support, remote or streamable MCP hosting, or live Apple integration tests.
 
 ## References
 
