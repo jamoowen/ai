@@ -9,4 +9,6 @@ wheels/
 # Virtual environments
 .venv
 .env
+*.p8
 node_modules/
+bin/

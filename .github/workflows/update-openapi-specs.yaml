@@ -49,6 +49,14 @@ jobs:
           unzip -p /tmp/app-store-connect-openapi.zip "$SPEC_FILE" \
             > api/apple/app-store-connect.openapi.json
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Validate OpenAPI specification
+        run: go test ./appstoreconnect -run '^TestCheckedInAppleSpecCompatibility$'
+
       - name: Commit if specification changed
         run: |
           git add api/apple/app-store-connect.openapi.json
