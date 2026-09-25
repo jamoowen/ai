@@ -1,0 +1,3 @@
+- when giving advice or answering questions, or planning to code, ensure you consider the most up to date practices. The AI industry moves extremely fast and it is imperative that we do not implement stale techniques or reference material that is outdated.
+- Design and consider things to be 'agent-first'. This means that we should assume that other developers using this codebase will be using ai for a lot of their coding. An example is the appstoreconnect/README which does not attempt to cover installation instructions for each possible coding agent. it simply suggests a prompt which an ai can use to install.
+- Prioritize readability and ensure that a human will very easily be able to understand the code you produce when doing a pr review.

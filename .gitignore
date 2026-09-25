@@ -12,3 +12,6 @@ wheels/
 *.p8
 node_modules/
 bin/
+
+# temp dir for agents working in parallel
+ephemeral/
