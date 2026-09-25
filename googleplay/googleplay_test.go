@@ -2,6 +2,7 @@ package googleplay
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -11,6 +12,13 @@ import (
 type testToken string
 
 func (t testToken) Token(context.Context) (string, error) { return string(t), nil }
+
+type countingToken struct{ calls int }
+
+func (t *countingToken) Token(context.Context) (string, error) {
+	t.calls++
+	return "token", nil
+}
 
 type testRoundTrip func(*http.Request) (*http.Response, error)
 
@@ -74,6 +82,65 @@ func TestLoadCatalogRejectsDuplicateUnsafeAndUnsupportedMethods(t *testing.T) {
 		if _, err := LoadCatalog([]byte(doc)); err == nil {
 			t.Fatalf("invalid document accepted: %s", doc)
 		}
+	}
+}
+
+func TestLoadCatalogRejectsMalformedOptionalSections(t *testing.T) {
+	for _, section := range []string{"schemas", "methods", "resources"} {
+		doc := `{"kind":"discovery#restDescription","name":"androidpublisher","version":"v3","methods":{"get":{"id":"get","path":"v3/get","httpMethod":"GET"}}}`
+		if section == "schemas" {
+			doc = `{"kind":"discovery#restDescription","name":"androidpublisher","version":"v3","schemas":[],"methods":{"get":{"id":"get","path":"v3/get","httpMethod":"GET"}}}`
+		} else if section == "methods" {
+			doc = `{"kind":"discovery#restDescription","name":"androidpublisher","version":"v3","methods":[]}`
+		} else {
+			doc = `{"kind":"discovery#restDescription","name":"androidpublisher","version":"v3","methods":{"get":{"id":"get","path":"v3/get","httpMethod":"GET"}},"resources":[]}`
+		}
+		if _, err := LoadCatalog([]byte(doc)); err == nil || !strings.Contains(err.Error(), "Discovery "+section+" must be an object") {
+			t.Fatalf("%s: err = %v", section, err)
+		}
+	}
+}
+
+func TestLoadCatalogRejectsNonObjectRequest(t *testing.T) {
+	doc := `{"kind":"discovery#restDescription","name":"androidpublisher","version":"v3","methods":{"update":{"id":"update","path":"v3/update","httpMethod":"PUT","request":null}}}`
+	if _, err := LoadCatalog([]byte(doc)); err == nil || !strings.Contains(err.Error(), "Discovery method request must be an object") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestClientRejectsUnusableRequestSchemaBeforeTokenAndTransport(t *testing.T) {
+	for name, test := range map[string]struct {
+		doc  string
+		want string
+	}{
+		"missing reference": {
+			doc:  `{"kind":"discovery#restDescription","name":"androidpublisher","version":"v3","methods":{"update":{"id":"update","path":"v3/update","httpMethod":"PUT","request":{}}}}`,
+			want: "request schema reference is required",
+		},
+		"unresolved reference": {
+			doc:  `{"kind":"discovery#restDescription","name":"androidpublisher","version":"v3","methods":{"update":{"id":"update","path":"v3/update","httpMethod":"PUT","request":{"$ref":"Missing"}}}}`,
+			want: `request schema "Missing" is missing`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			catalog, err := LoadCatalog([]byte(test.doc))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tokens := &countingToken{}
+			calls := 0
+			client := &Client{Catalog: catalog, Tokens: tokens, HTTPClient: &http.Client{Transport: testRoundTrip(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("transport must not be called")
+			})}}
+			_, err = client.Invoke(context.Background(), WriteOperation, Invocation{OperationID: "update", Body: map[string]any{}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v", err)
+			}
+			if tokens.calls != 0 || calls != 0 {
+				t.Fatalf("invalid request schema reached token=%d transport=%d", tokens.calls, calls)
+			}
+		})
 	}
 }
 

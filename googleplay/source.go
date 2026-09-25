@@ -15,7 +15,7 @@ import (
 
 const (
 	DefaultDiscoveryPath = "api/google/androidpublisher.v3.discovery.json"
-	maxSpecBytes         = 16 << 20
+	maxSpecBytes         = 16 * 1024 * 1024
 )
 
 var (

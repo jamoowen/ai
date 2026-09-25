@@ -78,6 +78,7 @@ Import `github.com/jamoowen/ai/googleplay` to load a catalog, create `NewService
 | `gp_delete` | Execute DELETE when enabled. |
 
 Use **search → describe operation → describe relevant schemas → execute**. Description output is capped at 32 KiB.
+All six tools share a local rate limit of 10 calls per second, with a burst of 20; excess calls return an error for the agent to retry.
 
 | Variable | Value |
 | --- | --- |

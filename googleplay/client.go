@@ -126,7 +126,7 @@ func (c *Client) Invoke(ctx context.Context, class OperationClass, in Invocation
 	response := &Response{Status: httpResponse.StatusCode, ContentType: httpResponse.Header.Get("Content-Type"), Headers: safeHeaders(httpResponse.Header)}
 	limit := c.MaxResponseBytes
 	if limit <= 0 {
-		limit = 1 << 20
+		limit = 1024 * 1024
 	}
 	bodyBytes, err := io.ReadAll(io.LimitReader(httpResponse.Body, limit+1))
 	if err != nil {
@@ -237,15 +237,19 @@ func validateBody(c *Catalog, op operation, body map[string]any) error {
 	if body == nil {
 		return nil
 	}
-	ref, _ := op.method.Request["$ref"].(string)
-	if ref == "" {
-		return nil
+	refValue, hasRef := op.method.Request["$ref"]
+	if !hasRef {
+		return errors.New("request schema reference is required")
+	}
+	ref, ok := refValue.(string)
+	if !ok || ref == "" {
+		return errors.New("request schema reference must be a non-empty string")
 	}
 	raw, ok := c.schemas[ref].(map[string]any)
 	if !ok {
-		return nil
+		return fmt.Errorf("request schema %q is missing or is not an object", ref)
 	}
-	if typ, _ := raw["type"].(string); typ != "" && typ != "object" {
+	if typ, _ := raw["type"].(string); typ != "object" {
 		return fmt.Errorf("request schema %s is not an object", ref)
 	}
 	props, _ := raw["properties"].(map[string]any)
@@ -351,7 +355,7 @@ func boundedDetail(v any) string {
 	if e != nil {
 		return "unable to marshal response detail"
 	}
-	const max = 4 << 10
+	const max = 4 * 1024
 	const marker = "... (truncated)"
 	if len(b) <= max {
 		return string(b)

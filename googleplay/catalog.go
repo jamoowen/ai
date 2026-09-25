@@ -11,7 +11,8 @@ import (
 	"strings"
 )
 
-const maxDescriptionBytes = 32 << 10
+// maxDescriptionBytes limits descriptions to 32 KiB so tool responses stay small.
+const maxDescriptionBytes = 32 * 1024
 
 type (
 	OperationSummary struct {
@@ -69,7 +70,10 @@ func LoadCatalog(data []byte) (*Catalog, error) {
 	if raw["kind"] != "discovery#restDescription" || raw["name"] != "androidpublisher" || raw["version"] != "v3" {
 		return nil, errors.New("Discovery document must describe androidpublisher v3")
 	}
-	schemas, _ := raw["schemas"].(map[string]any)
+	schemas, _, err := discoveryObject(raw, "schemas")
+	if err != nil {
+		return nil, err
+	}
 	c := &Catalog{raw: raw, schemas: schemas, operations: map[string]operation{}}
 	if err := c.addResources(raw); err != nil {
 		return nil, err
@@ -81,14 +85,22 @@ func LoadCatalog(data []byte) (*Catalog, error) {
 }
 
 func (c *Catalog) addResources(node map[string]any) error {
-	if methods, ok := node["methods"].(map[string]any); ok {
+	methods, hasMethods, err := discoveryObject(node, "methods")
+	if err != nil {
+		return err
+	}
+	if hasMethods {
 		for _, v := range methods {
 			if err := c.addMethod(v); err != nil {
 				return err
 			}
 		}
 	}
-	if resources, ok := node["resources"].(map[string]any); ok {
+	resources, hasResources, err := discoveryObject(node, "resources")
+	if err != nil {
+		return err
+	}
+	if hasResources {
 		for _, v := range resources {
 			child, ok := v.(map[string]any)
 			if !ok {
@@ -102,7 +114,29 @@ func (c *Catalog) addResources(node map[string]any) error {
 	return nil
 }
 
+// discoveryObject distinguishes an omitted optional Discovery section from a malformed one.
+func discoveryObject(node map[string]any, name string) (map[string]any, bool, error) {
+	v, ok := node[name]
+	if !ok {
+		return nil, false, nil
+	}
+	object, ok := v.(map[string]any)
+	if !ok {
+		return nil, false, fmt.Errorf("Discovery %s must be an object", name)
+	}
+	return object, true, nil
+}
+
 func (c *Catalog) addMethod(v any) error {
+	raw, ok := v.(map[string]any)
+	if !ok {
+		return fmt.Errorf("Discovery method must be an object")
+	}
+	if request, hasRequest := raw["request"]; hasRequest {
+		if _, ok := request.(map[string]any); !ok {
+			return fmt.Errorf("Discovery method request must be an object")
+		}
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
