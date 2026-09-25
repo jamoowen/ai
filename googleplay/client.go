@@ -50,105 +50,105 @@ func (c *Client) Invoke(ctx context.Context, class OperationClass, in Invocation
 	if c.Catalog == nil || c.Tokens == nil {
 		return nil, errors.New("catalog and token source are required")
 	}
-	op, e := c.Catalog.lookup(in.OperationID)
-	if e != nil {
-		return nil, e
+	operation, err := c.Catalog.lookup(in.OperationID)
+	if err != nil {
+		return nil, err
 	}
-	if !classAllows(class, op.Method) {
+	if !classAllows(class, operation.Method) {
 		return nil, fmt.Errorf("operation %s is not permitted by %s", in.OperationID, class)
 	}
-	if op.method.SupportsMediaUpload {
+	if operation.method.SupportsMediaUpload {
 		return nil, fmt.Errorf("operation %s supports media upload, which is unsupported", in.OperationID)
 	}
-	if in.Body != nil && op.method.Request == nil {
+	if in.Body != nil && operation.method.Request == nil {
 		return nil, fmt.Errorf("operation %s does not accept a request body", in.OperationID)
 	}
-	if in.Body == nil && op.method.Request != nil {
+	if in.Body == nil && operation.method.Request != nil {
 		return nil, fmt.Errorf("operation %s requires a JSON request body", in.OperationID)
 	}
-	if e := validateBody(c.Catalog, op, in.Body); e != nil {
-		return nil, e
+	if err := validateBody(c.Catalog, operation, in.Body); err != nil {
+		return nil, err
 	}
-	path, e := buildPath(op, in.PathParameters)
-	if e != nil {
-		return nil, e
+	path, err := buildPath(operation, in.PathParameters)
+	if err != nil {
+		return nil, err
 	}
-	u, e := url.Parse(BaseURL + path)
-	if e != nil {
-		return nil, e
+	endpoint, err := url.Parse(BaseURL + path)
+	if err != nil {
+		return nil, err
 	}
-	q := u.Query()
+	query := endpoint.Query()
 	for name, value := range in.Query {
-		p, ok := op.method.Parameters[name]
-		if !ok || p.Location != "query" {
+		parameter, ok := operation.method.Parameters[name]
+		if !ok || parameter.Location != "query" {
 			return nil, fmt.Errorf("unknown query parameter %q", name)
 		}
-		if e := addQuery(q, name, value, p); e != nil {
-			return nil, e
+		if err := addQuery(query, name, value, parameter); err != nil {
+			return nil, err
 		}
 	}
-	for n, p := range op.method.Parameters {
-		if p.Location == "query" && p.Required {
-			if _, ok := in.Query[n]; !ok {
-				return nil, fmt.Errorf("missing query parameter %q", n)
+	for name, parameter := range operation.method.Parameters {
+		if parameter.Location == "query" && parameter.Required {
+			if _, ok := in.Query[name]; !ok {
+				return nil, fmt.Errorf("missing query parameter %q", name)
 			}
 		}
 	}
-	u.RawQuery = q.Encode()
+	endpoint.RawQuery = query.Encode()
 	var body io.Reader
 	if in.Body != nil {
-		b, e := json.Marshal(in.Body)
-		if e != nil {
-			return nil, fmt.Errorf("encode request body: %w", e)
+		encodedBody, err := json.Marshal(in.Body)
+		if err != nil {
+			return nil, fmt.Errorf("encode request body: %w", err)
 		}
-		body = bytes.NewReader(b)
+		body = bytes.NewReader(encodedBody)
 	}
-	req, e := http.NewRequestWithContext(ctx, op.Method, u.String(), body)
-	if e != nil {
-		return nil, e
+	request, err := http.NewRequestWithContext(ctx, operation.Method, endpoint.String(), body)
+	if err != nil {
+		return nil, err
 	}
 	if in.Body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Content-Type", "application/json")
 	}
-	tok, e := c.Tokens.Token(ctx)
-	if e != nil {
-		return nil, e
+	token, err := c.Tokens.Token(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if tok == "" {
+	if token == "" {
 		return nil, errors.New("empty OAuth access token")
 	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-	resp, e := c.httpClient().Do(req)
-	if e != nil {
-		return nil, e
+	request.Header.Set("Authorization", "Bearer "+token)
+	httpResponse, err := c.httpClient().Do(request)
+	if err != nil {
+		return nil, err
 	}
-	defer resp.Body.Close()
-	out := &Response{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Headers: safeHeaders(resp.Header)}
+	defer httpResponse.Body.Close()
+	response := &Response{Status: httpResponse.StatusCode, ContentType: httpResponse.Header.Get("Content-Type"), Headers: safeHeaders(httpResponse.Header)}
 	limit := c.MaxResponseBytes
 	if limit <= 0 {
 		limit = 1 << 20
 	}
-	b, e := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-	if e != nil {
-		return out, e
+	bodyBytes, err := io.ReadAll(io.LimitReader(httpResponse.Body, limit+1))
+	if err != nil {
+		return response, err
 	}
-	if int64(len(b)) > limit {
-		return out, fmt.Errorf("response exceeds %d byte limit", limit)
+	if int64(len(bodyBytes)) > limit {
+		return response, fmt.Errorf("response exceeds %d byte limit", limit)
 	}
-	parsed, e := parseResponseBody(out.ContentType, b)
-	if e == nil {
-		out.Body = parsed
+	parsed, err := parseResponseBody(response.ContentType, bodyBytes)
+	if err == nil {
+		response.Body = parsed
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if e != nil {
-			return out, fmt.Errorf("Google Play Developer API returned HTTP %d: %w", resp.StatusCode, e)
+	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
+		if err != nil {
+			return response, fmt.Errorf("Google Play Developer API returned HTTP %d: %w", httpResponse.StatusCode, err)
 		}
-		return out, fmt.Errorf("Google Play Developer API returned HTTP %d: %s", resp.StatusCode, boundedDetail(parsed))
+		return response, fmt.Errorf("Google Play Developer API returned HTTP %d: %s", httpResponse.StatusCode, boundedDetail(parsed))
 	}
-	if e != nil {
-		return out, e
+	if err != nil {
+		return response, err
 	}
-	return out, nil
+	return response, nil
 }
 
 func classAllows(c OperationClass, m string) bool {

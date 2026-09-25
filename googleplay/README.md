@@ -49,7 +49,11 @@ not open, print, copy into configuration, log, or commit its contents.
 Verify MCP initialization and all six gp_* tools. Search for
 androidpublisher.reviews.list, describe its operation and relevant schema, then
 make one read-only gp_read reviews.list request using the supplied package name.
-Do not modify Google Play data.
+Also search for androidpublisher.applications.tracks.releases.list and make one
+read-only gp_read request with path parameter
+parent=applications/<package-name>/tracks/production to check the latest
+production releases. Report draft releases separately from published release
+states. Do not modify Google Play data.
 
 Show relevant configuration changes and test results without exposing secrets
 or unrelated settings. Explain any required client restart and checks that

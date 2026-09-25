@@ -63,17 +63,17 @@ func loadConfiguredCatalog(source string) (*Catalog, []string, error) {
 }
 
 func loadDefaultCatalog() (*Catalog, []string, error) {
-	dir, e := cacheDirectory()
-	if e != nil {
-		return loadUncachedDefault(e)
+	directory, err := cacheDirectory()
+	if err != nil {
+		return loadUncachedDefault(err)
 	}
-	cached, record, cacheErr := loadCachedCatalog(dir)
+	cached, record, cacheErr := loadCachedCatalog(directory)
 	if cacheErr != nil {
 		record = cachedDiscovery{}
 	}
-	b, status, etag, e := downloadDiscovery(defaultDiscoveryURL, record.ETag)
-	if e != nil {
-		return fallback(cached, cacheErr, fmt.Errorf("refresh Discovery document: %w", e))
+	document, status, etag, err := downloadDiscovery(defaultDiscoveryURL, record.ETag)
+	if err != nil {
+		return fallback(cached, cacheErr, fmt.Errorf("refresh Discovery document: %w", err))
 	}
 	if status == http.StatusNotModified {
 		if cached == nil {
@@ -81,12 +81,12 @@ func loadDefaultCatalog() (*Catalog, []string, error) {
 		}
 		return cached, nil, nil
 	}
-	fresh, e := LoadCatalog(b)
-	if e != nil {
-		return fallback(cached, cacheErr, fmt.Errorf("validate downloaded Discovery document: %w", e))
+	fresh, err := LoadCatalog(document)
+	if err != nil {
+		return fallback(cached, cacheErr, fmt.Errorf("validate downloaded Discovery document: %w", err))
 	}
-	if e := storeCachedCatalog(dir, b, etag); e != nil {
-		return fresh, []string{fmt.Sprintf("could not cache Discovery document: %v; using the newly downloaded document", e)}, nil
+	if err := storeCachedCatalog(directory, document, etag); err != nil {
+		return fresh, []string{fmt.Sprintf("could not cache Discovery document: %v; using the newly downloaded document", err)}, nil
 	}
 	return fresh, nil, nil
 }
