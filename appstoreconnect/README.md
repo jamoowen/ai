@@ -4,6 +4,8 @@ Give an AI agent access to Apple's App Store Connect API through a local MCP ser
 
 Requests are validated against Apple's OpenAPI specification and signed locally using your API key. You provide the path to the private key, not its contents.
 
+Maintainers can find the server's security and loading invariants in [DESIGN.md](DESIGN.md).
+
 Choose your integration:
 
 - **Existing agent:** use the setup prompt below with Codex, Claude Code, or another local MCP client.
@@ -59,8 +61,6 @@ preserve unrelated settings.
 Persist these environment values in the client's local MCP configuration:
 - ASC_KEY_ID: the Key ID above.
 - ASC_PRIVATE_KEY_PATH: the private key path above.
-- ASC_OPENAPI_SOURCE: the absolute path to this repository's
-  api/apple/app-store-connect.openapi.json.
 - ASC_ISSUER_ID: empty for an individual key, or the supplied team Issuer ID.
 
 Do not require me to export variables before each session. Keep writes
@@ -104,7 +104,7 @@ import (
 
 func main() {
 	catalog, err := appstoreconnect.LoadCatalogSource(
-		"/absolute/path/to/ai/api/apple/app-store-connect.openapi.json",
+		"", // Uses the cached specification and refreshes it from GitHub.
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -221,12 +221,12 @@ These values configure the MCP server process. The setup prompt supplies them th
 | `ASC_KEY_ID` | Required Apple API Key ID. |
 | `ASC_PRIVATE_KEY_PATH` | Required absolute path to the `.p8` private key. |
 | `ASC_ISSUER_ID` | Team Issuer ID; empty or unset for individual keys. |
-| `ASC_OPENAPI_SOURCE` | Path or HTTPS URL to the API definition JSON. Use the absolute path to `api/apple/app-store-connect.openapi.json` in this repository. |
+| `ASC_OPENAPI_SOURCE` | Optional path or HTTPS URL to the API definition JSON. When unset, the server conditionally fetches the current checked-in specification from GitHub, caches it in the user's cache directory, and sends `If-None-Match` on later starts. Set this only to override that default, for example to use a local or pinned HTTPS definition. |
 | `ASC_ALLOW_WRITES` | Set to `true` to allow POST/PATCH. Disabled by default. |
 | `ASC_ALLOW_DELETES` | Set to `true` to allow DELETE. Disabled by default. |
 | `ASC_MAX_RESPONSE_BYTES` | Maximum response size in bytes. Default: `1048576` (1 MiB). |
 
-`ASC_OPENAPI_SOURCE` is not a credential or another Apple download. It points to the API description already checked into this repository. Set an absolute path to avoid dependence on the server's working directory.
+No OpenAPI source configuration is needed for normal use. The default source is the checked-in definition in this repository, fetched through GitHub's Contents API. It is cached at the operating system's user cache location under `appstoreconnect-mcp`; a 304 response reuses the validated cache without downloading the JSON again. If refresh fails, the server uses a previously validated cache and reports the condition on stderr. An explicit `ASC_OPENAPI_SOURCE` accepts a local path or HTTPS URL and bypasses this cache behavior. Set an absolute local path when using that override to avoid dependence on the server's working directory.
 
 ### Limits and security
 

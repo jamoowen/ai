@@ -13,9 +13,12 @@ import (
 
 func main() {
 	source := os.Getenv("ASC_OPENAPI_SOURCE")
-	cat, err := appstoreconnect.LoadCatalogSource(source)
+	cat, diagnostics, err := appstoreconnect.LoadCatalogSourceWithDiagnostics(source)
 	if err != nil {
 		fatal(err)
+	}
+	for _, diagnostic := range diagnostics {
+		fmt.Fprintln(os.Stderr, "appstoreconnect-mcp:", diagnostic)
 	}
 	token, err := appstoreconnect.NewES256TokenSource(os.Getenv("ASC_KEY_ID"), os.Getenv("ASC_ISSUER_ID"), os.Getenv("ASC_PRIVATE_KEY_PATH"), 0, nil)
 	if err != nil {
