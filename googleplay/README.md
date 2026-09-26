@@ -1,6 +1,6 @@
 # Google Play Console MCP
 
-`googleplay-mcp` gives a local AI agent constrained access to the Google Play Developer API. It reads Google's Discovery document, fixes API and token hosts, and keeps the service-account key outside model inputs. See [DESIGN.md](DESIGN.md) for the security invariants.
+`googleplay-mcp` gives a local AI agent constrained access to the Google Play Developer API. It reads Google's Discovery document, fixes API and token hosts, and keeps the service-account key outside model inputs.
 
 Use an existing agent through the setup prompt below, or import the public `github.com/jamoowen/ai/googleplay` Go package for the catalog, service-account token source, and constrained client.
 
@@ -90,6 +90,6 @@ All six tools share a local rate limit of 10 calls per second, with a burst of 2
 
 `api/google/androidpublisher.v3.discovery.json` is a checked-in compatibility snapshot and optional offline `GP_DISCOVERY_SOURCE`. Google can change the live Discovery document, so update this snapshot deliberately and run the test suite.
 
-The API cannot list every app an account can access, so provide a known package for `reviews.list`. The server is local stdio only, does not paginate automatically, and rejects media upload methods and binary responses. It never permits arbitrary URLs, methods, headers, or token endpoints. MCP traffic uses stdout; diagnostics use stderr.
+The API cannot list every app an account can access, so provide a known package for `reviews.list`. The server is local stdio only, does not paginate automatically, and rejects media upload methods and binary responses. It validates and escapes path parameters, and accepts only documented query parameters and JSON body fields. It never permits arbitrary URLs, methods, headers, or token endpoints. MCP traffic uses stdout; diagnostics use stderr.
 
 [Google Play API getting started](https://developers.google.com/android-publisher/getting_started) · [Play Console permissions](https://support.google.com/googleplay/android-developer/answer/10019561) · [Create keys](https://cloud.google.com/iam/docs/keys-create-delete) · [Codex MCP](https://developers.openai.com/codex/mcp) · [Claude Code MCP](https://code.claude.com/docs/en/mcp)
