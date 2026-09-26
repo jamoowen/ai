@@ -10,6 +10,10 @@
 
 See the [App Store Connect MCP guide](appstoreconnect/README.md) for Apple credentials, Codex and Claude Code setup, custom-agent MCP integration, and direct Go usage.
 
+## Google Play Console MCP
+
+See the [Google Play Console MCP guide](googleplay/README.md) for service-account setup and agent MCP configuration.
+
 ## Some notes
 - This codebase (for now) favours simplicity - no gui or tui frameworks to take my mental energy away from the actual agent bits
 - This codebase is largely inspired my Pi and a handful of blog articles from Mario like [this one](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/)
